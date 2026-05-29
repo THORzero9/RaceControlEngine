@@ -1,0 +1,35 @@
+# Virtual Environment
+v_env/
+.venv/
+env/
+ENV/
+
+# Sensitive Configuration
+.env
+.env.*
+!*.example
+
+# Node Dependencies & Builds
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+.eslintcache
+
+# Python Caches & Testing
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Local Agent Workspace
+.agents/
+scratch/
+
+# OS Files
+.DS_Store
+Thumbs.db
