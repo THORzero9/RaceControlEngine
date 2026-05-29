@@ -34,7 +34,7 @@ function SettingsPage() {
   const fetchCircuits = async () => {
     setLoadingCircuits(true);
     try {
-      const response = await fetch('http://localhost:8000/api/v1/settings/circuits');
+      const response = await fetch('/api/v1/settings/circuits');
       if (response.ok) {
         const data = await response.json();
         setCircuits(data);
@@ -52,7 +52,7 @@ function SettingsPage() {
   const fetchStreams = async () => {
     setLoadingStreams(true);
     try {
-      const response = await fetch('http://localhost:8000/api/v1/settings/streams');
+      const response = await fetch('/api/v1/settings/streams');
       if (response.ok) {
         const data = await response.json();
         setStreams(data);
@@ -70,7 +70,7 @@ function SettingsPage() {
   const fetchDiagnostics = async () => {
     setLoadingDiagnostics(true);
     try {
-      const response = await fetch('http://localhost:8000/api/v1/settings/diagnostics');
+      const response = await fetch('/api/v1/settings/diagnostics');
       if (response.ok) {
         const data = await response.json();
         setDiagnostics(data);
@@ -115,7 +115,7 @@ function SettingsPage() {
     }
 
     try {
-      const response = await fetch('http://localhost:8000/api/v1/settings/circuits', {
+      const response = await fetch('/api/v1/settings/circuits', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -150,7 +150,7 @@ function SettingsPage() {
     }
 
     try {
-      const response = await fetch('http://localhost:8000/api/v1/settings/streams', {
+      const response = await fetch('/api/v1/settings/streams', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newStream)
@@ -171,7 +171,7 @@ function SettingsPage() {
   // Toggle Stream Switch
   const handleToggleStream = async (id, currentActive) => {
     try {
-      const response = await fetch('http://localhost:8000/api/v1/settings/streams/toggle', {
+      const response = await fetch('/api/v1/settings/streams/toggle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -88,7 +88,7 @@ function RegulationsView() {
     const fetchRegulations = async () => {
       setIsLoading(true);
       try {
-        const response = await fetch('http://localhost:8000/api/v1/regulations');
+        const response = await fetch('/api/v1/regulations');
         if (response.ok) {
           const data = await response.json();
           setRegulations(data);

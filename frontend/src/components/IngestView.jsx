@@ -76,7 +76,7 @@ function IngestView() {
     formData.append('series', selectedSeries);
 
     try {
-      const response = await axios.post('http://localhost:8000/api/v1/ingest/pdf', formData, {
+      const response = await axios.post('/api/v1/ingest/pdf', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         }

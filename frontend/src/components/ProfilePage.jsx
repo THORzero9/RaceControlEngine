@@ -10,7 +10,7 @@ function ProfilePage({ user, onLogout }) {
     const fetchSignedOffHistory = async () => {
       setLoading(true);
       try {
-        const response = await fetch('http://localhost:8000/api/v1/archive');
+        const response = await fetch('/api/v1/archive');
         if (response.ok) {
           const data = await response.json();
           // Filter by the steward's username or name if recorded

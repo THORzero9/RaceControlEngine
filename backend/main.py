@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from backend.database import db_manager
 from backend.routes import router as incident_router
 from fastapi.middleware.cors import CORSMiddleware
+from backend.config import settings
 
 # The Lifespan context handles our startup and shutdown loops gracefully
 @asynccontextmanager
@@ -22,7 +23,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS if isinstance(settings.CORS_ORIGINS, list) else [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
