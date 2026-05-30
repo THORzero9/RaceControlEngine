@@ -85,11 +85,11 @@ class LoginPayload(BaseModel):
     username: str
     password: str
 
-JWT_SECRET = "racecontrolsecret2026!!!"
-JWT_ALGORITHM = "HS256"
+JWT_SECRET = settings.JWT_SECRET
+JWT_ALGORITHM = settings.JWT_ALGORITHM
 
 def hash_password(password: str) -> str:
-    salt = "racecontrol_salt_2026"
+    salt = settings.PASSWORD_SALT
     return hashlib.sha256((password + salt).encode("utf-8")).hexdigest()
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

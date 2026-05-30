@@ -172,7 +172,7 @@ function App() {
         return;
       }
       try {
-        const response = await fetch('http://localhost:8000/api/v1/auth/me', {
+        const response = await fetch('/api/v1/auth/me', {
           headers: {
             'Authorization': `Bearer ${token}`
           }
@@ -259,7 +259,7 @@ function App() {
   useEffect(() => {
     const checkHeartbeat = async () => {
       try {
-        const response = await fetch('http://localhost:8000/health');
+        const response = await fetch('/health');
         if (response.ok) {
           const data = await response.json();
           if (data.status === 'healthy') {
@@ -282,7 +282,7 @@ function App() {
     if (activeView === 'dashboard' || activeView === 'regulations') {
       const fetchInitialRegulations = async () => {
         try {
-          const response = await fetch('http://localhost:8000/api/v1/regulations');
+          const response = await fetch('/api/v1/regulations');
           if (response.ok) {
             const data = await response.json();
             setAllRegulations(data);
@@ -301,7 +301,7 @@ function App() {
       const fetchArchive = async () => {
         setLoadingArchive(true);
         try {
-          const response = await fetch('http://localhost:8000/api/v1/adjudicate');
+          const response = await fetch('/api/v1/adjudicate');
           if (response.ok) {
             const data = await response.json();
             setArchivedIncidents(data);
@@ -420,7 +420,7 @@ function App() {
     };
 
     try {
-      const response = await fetch('http://localhost:8000/api/v1/investigate', {
+      const response = await fetch('/api/v1/investigate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -484,7 +484,7 @@ function App() {
     };
 
     try {
-      const response = await fetch('http://localhost:8000/api/v1/adjudicate', {
+      const response = await fetch('/api/v1/adjudicate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

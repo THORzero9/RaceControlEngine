@@ -1,7 +1,7 @@
 import subprocess, sys, os
 
 # 1. Check backend syntax
-os.chdir("/home/bhaswat/projects/RaceControlEngine")
+os.chdir("/app")
 result = subprocess.run([sys.executable, "-m", "py_compile", "backend/routes.py"], capture_output=True, text=True)
 if result.returncode == 0:
     print("✅ backend/routes.py compiles clean")
@@ -10,10 +10,10 @@ else:
     sys.exit(1)
 
 # 2. Check frontend build
-os.chdir("/home/bhaswat/projects/RaceControlEngine/frontend")
+os.chdir("/app/frontend")
 result = subprocess.run(
-    ["/home/bhaswat/.nvm/versions/node/v22.18.0/bin/node",
-     "/home/bhaswat/projects/RaceControlEngine/frontend/node_modules/.bin/vite",
+    ["node",
+     "node_modules/.bin/vite",
      "build"],
     capture_output=True, text=True, timeout=120
 )

@@ -20,7 +20,7 @@ function ArchiveView() {
     const fetchArchive = async () => {
       setIsLoading(true);
       try {
-        const response = await fetch('http://localhost:8000/api/v1/archive');
+        const response = await fetch('/api/v1/archive');
         if (response.ok) {
           const data = await response.json();
           setArchive(data);
