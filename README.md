@@ -39,6 +39,10 @@ Create a `.env` file in the root directory:
 MONGO_URI=your_mongodb_atlas_connection_string
 MONGO_DB_NAME=RaceControlEngine
 GEMINI_API_KEY=your_gemini_api_key_here
+# Optional configuration (defaults are provided but should be overridden in production)
+JWT_SECRET=your_secure_jwt_secret_here
+PASSWORD_SALT=your_secure_password_salt_here
+CORS_ORIGINS=http://localhost:5173,http://localhost:3000
 ```
 
 ### Backend Setup
