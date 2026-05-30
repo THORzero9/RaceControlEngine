@@ -227,6 +227,9 @@ function App() {
   // Live sporting regulations loaded from database
   const [allRegulations, setAllRegulations] = useState([]);
 
+  // Registered circuits loaded from database
+  const [circuits, setCircuits] = useState([]);
+
   // 2. UI / Application States
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -292,6 +295,24 @@ function App() {
         }
       };
       fetchInitialRegulations();
+    }
+  }, [activeView]);
+
+  // Fetch active circuits from MongoDB when mounting or switching views
+  useEffect(() => {
+    if (activeView === 'dashboard' || activeView === 'settings') {
+      const fetchInitialCircuits = async () => {
+        try {
+          const response = await fetch('/api/v1/settings/circuits');
+          if (response.ok) {
+            const data = await response.json();
+            setCircuits(data);
+          }
+        } catch (err) {
+          console.error("Failed to load circuits register:", err);
+        }
+      };
+      fetchInitialCircuits();
     }
   }, [activeView]);
 
@@ -465,6 +486,10 @@ function App() {
   const applicableClauses = backendResponse?.applicable_clauses || standbyRules;
   const allowablePenalties = normalizePenalties(backendResponse?.regulatory_framework?.allowable_penalties || activeTemplate.allowable_penalties);
   const draftRuling = backendResponse?.steward_draft_ruling;
+
+  const filteredCircuits = circuits.filter(c => c.championship.toUpperCase() === seriesId.toUpperCase());
+  const activeCircuit = filteredCircuits.find(c => c.name.toUpperCase() === trackLayout.toUpperCase());
+  const isTurnInvalid = turnNumber !== '' && activeCircuit && (turnNumber < 1 || turnNumber > activeCircuit.turn_count);
 
   const handleApproveAdjudication = async () => {
     if (!backendResponse) return;
@@ -698,32 +723,59 @@ function App() {
                   {/* Circuit Input */}
                   <div className="flex flex-col gap-sm">
                     <label className="font-label-caps text-[10px] font-bold text-on-surface-variant tracking-widest">CIRCUIT / LAYOUT</label>
-                    <input 
-                      type="text" 
-                      value={trackLayout} 
+                    <select 
+                      value={trackLayout.toUpperCase()} 
                       onChange={(e) => {
-                        setTrackLayout(e.target.value.toUpperCase());
+                        setTrackLayout(e.target.value);
                         setBackendResponse(null);
                         setIsEditing(false);
                       }}
-                      className="bg-surface-dim border border-outline-variant text-on-surface font-data-md text-xs p-sm focus:border-secondary-container outline-none rounded-none"
-                    />
+                      className="bg-surface-dim border border-outline-variant text-on-surface font-data-md text-xs p-sm focus:border-secondary-container outline-none rounded-none w-full"
+                    >
+                      {filteredCircuits.map((c) => (
+                        <option key={c._id || c.name} value={c.name.toUpperCase()}>
+                          {c.name.toUpperCase()}
+                        </option>
+                      ))}
+                      {!filteredCircuits.some(c => c.name.toUpperCase() === trackLayout.toUpperCase()) && (
+                        <option value={trackLayout.toUpperCase()}>
+                          {trackLayout.toUpperCase()}
+                        </option>
+                      )}
+                    </select>
                   </div>
 
                   {/* Turn Number Input (Requires int parsing for backend) */}
                   <div className="flex flex-col gap-sm">
-                    <label className="font-label-caps text-[10px] font-bold text-on-surface-variant tracking-widest">TURN NUMBER (INTEGER)</label>
+                    <div className="flex justify-between items-center">
+                      <label className="font-label-caps text-[10px] font-bold text-on-surface-variant tracking-widest">TURN NUMBER (INTEGER)</label>
+                      {activeCircuit && (
+                        <span className="text-[9px] text-secondary-container font-display-mono uppercase">
+                          Max: {activeCircuit.turn_count} turns
+                        </span>
+                      )}
+                    </div>
                     <input 
                       type="number" 
+                      min="1"
+                      max={activeCircuit ? activeCircuit.turn_count : undefined}
                       value={turnNumber} 
                       onChange={(e) => {
                         setTurnNumber(e.target.value ? parseInt(e.target.value, 10) : '');
                         setBackendResponse(null);
                         setIsEditing(false);
                       }}
-                      className="bg-surface-dim border border-outline-variant text-on-surface font-data-md text-xs p-sm focus:border-secondary-container outline-none rounded-none"
+                      className={`bg-surface-dim border text-on-surface font-data-md text-xs p-sm focus:border-secondary-container outline-none rounded-none ${
+                        isTurnInvalid ? 'border-error/60 focus:border-error text-error font-bold shadow-[0_0_8px_rgba(255,0,0,0.15)]' : 'border-outline-variant'
+                      }`}
                       placeholder="e.g. 17"
                     />
+                    {isTurnInvalid && (
+                      <span className="text-[10px] text-error font-semibold flex items-center gap-xxs animate-fadeIn">
+                        <span className="material-symbols-outlined text-[12px]">warning</span>
+                        Exceeds track limits (1 - {activeCircuit.turn_count})
+                      </span>
+                    )}
                   </div>
 
                   {/* Surface Conditions Toggle */}

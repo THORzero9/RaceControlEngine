@@ -1,7 +1,8 @@
-import subprocess, sys, os
+import subprocess, sys, os, shutil
 
 # 1. Check backend syntax
-os.chdir("/app")
+script_dir = os.path.dirname(os.path.abspath(__file__))
+os.chdir(script_dir)
 result = subprocess.run([sys.executable, "-m", "py_compile", "backend/routes.py"], capture_output=True, text=True)
 if result.returncode == 0:
     print("✅ backend/routes.py compiles clean")
@@ -10,9 +11,16 @@ else:
     sys.exit(1)
 
 # 2. Check frontend build
-os.chdir("/app/frontend")
+os.chdir(os.path.join(script_dir, "frontend"))
+
+node_executable = "node"
+if not shutil.which("node"):
+    fallback_node = "/home/bhaswat/.nvm/versions/node/v22.18.0/bin/node"
+    if os.path.exists(fallback_node):
+        node_executable = fallback_node
+
 result = subprocess.run(
-    ["node",
+    [node_executable,
      "node_modules/.bin/vite",
      "build"],
     capture_output=True, text=True, timeout=120
