@@ -1,0 +1,780 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Cross-Series Race Control Engine",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://race-control-engine-478055061591.us-central1.run.app",
+      "description": "Production Cloud Run API Server"
+    }
+  ],
+  "paths": {
+    "/api/v1/investigate": {
+      "post": {
+        "tags": [
+          "Race Control Adjudication"
+        ],
+        "summary": "Analyze Track Incident",
+        "operationId": "analyze_track_incident_api_v1_investigate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncidentPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/adjudicate": {
+      "get": {
+        "tags": [
+          "Race Control Adjudication"
+        ],
+        "summary": "Get Adjudicated Incidents",
+        "operationId": "get_adjudicated_incidents_api_v1_adjudicate_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Race Control Adjudication"
+        ],
+        "summary": "Store Final Adjudication",
+        "operationId": "store_final_adjudication_api_v1_adjudicate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinalAdjudicationPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/archive": {
+      "get": {
+        "tags": [
+          "Race Control Adjudication"
+        ],
+        "summary": "Get Archive Incidents",
+        "operationId": "get_archive_incidents_api_v1_archive_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/regulations": {
+      "get": {
+        "tags": [
+          "Race Control Adjudication"
+        ],
+        "summary": "Get All Regulations",
+        "operationId": "get_all_regulations_api_v1_regulations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ingest/pdf": {
+      "post": {
+        "tags": [
+          "Race Control Adjudication"
+        ],
+        "summary": "Ingest Regulations Pdf",
+        "operationId": "ingest_regulations_pdf_api_v1_ingest_pdf_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ingest_regulations_pdf_api_v1_ingest_pdf_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/circuits": {
+      "get": {
+        "tags": [
+          "Race Control Adjudication"
+        ],
+        "summary": "Get Circuits",
+        "operationId": "get_circuits_api_v1_settings_circuits_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Race Control Adjudication"
+        ],
+        "summary": "Add Circuit",
+        "operationId": "add_circuit_api_v1_settings_circuits_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CircuitConfigPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/streams": {
+      "get": {
+        "tags": [
+          "Race Control Adjudication"
+        ],
+        "summary": "Get Streams",
+        "operationId": "get_streams_api_v1_settings_streams_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Race Control Adjudication"
+        ],
+        "summary": "Add Stream",
+        "operationId": "add_stream_api_v1_settings_streams_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StreamConfigPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/streams/toggle": {
+      "post": {
+        "tags": [
+          "Race Control Adjudication"
+        ],
+        "summary": "Toggle Stream",
+        "operationId": "toggle_stream_api_v1_settings_streams_toggle_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToggleStreamPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings/diagnostics": {
+      "get": {
+        "tags": [
+          "Race Control Adjudication"
+        ],
+        "summary": "Get Diagnostics",
+        "operationId": "get_diagnostics_api_v1_settings_diagnostics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "Race Control Adjudication"
+        ],
+        "summary": "Login",
+        "operationId": "login_api_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "tags": [
+          "Race Control Adjudication"
+        ],
+        "summary": "Get Current User",
+        "operationId": "get_current_user_api_v1_auth_me_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health Check",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Body_ingest_regulations_pdf_api_v1_ingest_pdf_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          },
+          "series": {
+            "type": "string",
+            "title": "Series"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "series"
+        ],
+        "title": "Body_ingest_regulations_pdf_api_v1_ingest_pdf_post"
+      },
+      "CircuitConfigPayload": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Circuit Name"
+          },
+          "turn_count": {
+            "type": "integer",
+            "title": "Turn Count",
+            "description": "Total Turn Count"
+          },
+          "championship": {
+            "type": "string",
+            "title": "Championship",
+            "description": "Championship Affinity (F1, MotoGP, WEC)"
+          },
+          "micro_sectors": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Micro Sectors",
+            "description": "Micro-Sector Coordinates mapping",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "turn_count",
+          "championship"
+        ],
+        "title": "CircuitConfigPayload"
+      },
+      "FinalAdjudicationPayload": {
+        "properties": {
+          "incident_details": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Incident Details",
+            "description": "Details of the incident payload"
+          },
+          "regulatory_framework": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Regulatory Framework",
+            "description": "Governing body and allowed penalties details"
+          },
+          "applicable_clauses": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Applicable Clauses",
+            "description": "Matched regulation clauses list"
+          },
+          "steward_draft_ruling": {
+            "type": "string",
+            "title": "Steward Draft Ruling",
+            "description": "Raw textual draft ruling from the copilot engine"
+          },
+          "final_status": {
+            "type": "string",
+            "title": "Final Status",
+            "description": "Status (APPROVED or AMENDED)"
+          },
+          "steward_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steward Notes",
+            "description": "Optional notes written by human stewards"
+          },
+          "penalty_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Penalty Type",
+            "description": "The type of penalty applied",
+            "default": "Time Penalty"
+          },
+          "penalty_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Penalty Value",
+            "description": "The numerical value or weight of the penalty",
+            "default": 5
+          }
+        },
+        "type": "object",
+        "required": [
+          "incident_details",
+          "regulatory_framework",
+          "applicable_clauses",
+          "steward_draft_ruling",
+          "final_status"
+        ],
+        "title": "FinalAdjudicationPayload"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "IncidentPayload": {
+        "properties": {
+          "series_id": {
+            "type": "string",
+            "title": "Series Id",
+            "description": "Target championship series identifier (F1, MOTOGP, WEC)"
+          },
+          "track_layout": {
+            "type": "string",
+            "title": "Track Layout",
+            "description": "Name of the circuit where the incident occurred"
+          },
+          "turn_number": {
+            "type": "integer",
+            "title": "Turn Number",
+            "description": "Turn coordinate of the incident zone"
+          },
+          "track_conditions": {
+            "type": "string",
+            "title": "Track Conditions",
+            "description": "Climatic state of the surface (DRY, WET, MIXED)",
+            "default": "DRY"
+          },
+          "marshal_notes": {
+            "type": "string",
+            "title": "Marshal Notes",
+            "description": "Raw textual transcription or observation notes from track marshals"
+          },
+          "driver_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Driver Class",
+            "description": "Mandatory configuration for WEC multiclass routing (Hypercar, LMGT3)"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "Conversational session persistence identifier"
+          }
+        },
+        "type": "object",
+        "required": [
+          "series_id",
+          "track_layout",
+          "turn_number",
+          "marshal_notes"
+        ],
+        "title": "IncidentPayload"
+      },
+      "LoginPayload": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginPayload"
+      },
+      "StreamConfigPayload": {
+        "properties": {
+          "target": {
+            "type": "string",
+            "title": "Target",
+            "description": "Stream Target identifier"
+          },
+          "protocol": {
+            "type": "string",
+            "title": "Protocol",
+            "description": "Protocol Selector (WebSockets, MQTT, REST)"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "description": "Active State Toggle"
+          }
+        },
+        "type": "object",
+        "required": [
+          "target",
+          "protocol",
+          "active"
+        ],
+        "title": "StreamConfigPayload"
+      },
+      "ToggleStreamPayload": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "active"
+        ],
+        "title": "ToggleStreamPayload"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

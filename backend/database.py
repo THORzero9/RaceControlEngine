@@ -1,3 +1,4 @@
+import sys
 from motor.motor_asyncio import AsyncIOMotorClient
 from backend.config import settings
 
@@ -7,11 +8,11 @@ class DatabaseManager:
         self.db = None
 
     async def connect_to_database(self):
-        print(f"Opening connection pool to MongoDB Atlas...")
+        print(f"Opening connection pool to MongoDB Atlas...", file=sys.stderr)
         # Initialize our non-blocking Motor client using our validated URI
         self.client = AsyncIOMotorClient(settings.MONGO_URI)
         self.db = self.client[settings.MONGO_DB_NAME]
-        print(" MongoDB connection pool safely established.")
+        print(" MongoDB connection pool safely established.", file=sys.stderr)
         await self.seed_baseline_if_empty()
 
     async def seed_baseline_if_empty(self):
@@ -19,7 +20,7 @@ class DatabaseManager:
             # 1. Check if series_configs is empty
             config_count = await self.db["series_configs"].count_documents({})
             if config_count == 0:
-                print("Seeding baseline series_configs...")
+                print("Seeding baseline series_configs...", file=sys.stderr)
                 configs = [
                     {
                         "_id": "F1_CONFIG",
@@ -55,7 +56,7 @@ class DatabaseManager:
             # 2. Check if sporting_codes is empty
             rules_count = await self.db["sporting_codes"].count_documents({})
             if rules_count == 0:
-                print("Seeding baseline sporting_codes...")
+                print("Seeding baseline sporting_codes...", file=sys.stderr)
                 rules = [
                     {
                         "_id": "FIA_APP_L_CH4_ART2B",
@@ -96,12 +97,12 @@ class DatabaseManager:
                 ]
                 await self.db["sporting_codes"].insert_many(rules)
         except Exception as e:
-            print(f"Error during baseline seeding check: {str(e)}")
+            print(f"Error during baseline seeding check: {str(e)}", file=sys.stderr)
 
     async def close_database_connection(self):
         if self.client:
             self.client.close()
-            print("MongoDB connection pool closed cleanly.")
+            print("MongoDB connection pool closed cleanly.", file=sys.stderr)
 
     # Explicit properties to access our seeded collections cleanly
     @property

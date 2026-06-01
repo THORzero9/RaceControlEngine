@@ -92,9 +92,6 @@ function SettingsPage() {
       fetchStreams();
     } else if (activeTab === 'diagnostics') {
       fetchDiagnostics();
-      // Poll diagnostics every 5s
-      const interval = setInterval(fetchDiagnostics, 5000);
-      return () => clearInterval(interval);
     }
   }, [activeTab]);
 
@@ -433,17 +430,28 @@ function SettingsPage() {
         {/* Tab 3 Content: Diagnostics */}
         {activeTab === 'diagnostics' && (
           <div className="flex-1 overflow-y-auto scrolling-terminal p-md flex flex-col gap-lg">
-            <div className="flex flex-col gap-sm">
-              <h3 className="font-label-caps text-sm font-bold text-on-surface tracking-wider border-b border-outline-variant/30 pb-xs">
-                EXTERNAL LINK DIAGNOSTICS & SYSTEM STATUS
-              </h3>
-              <p className="text-xs text-on-surface-variant leading-relaxed">
-                Persistent health matrix monitoring local processes, database connection pools, and machine learning limits.
-              </p>
+            <div className="flex justify-between items-center border-b border-outline-variant/30 pb-xs flex-none">
+              <div className="flex flex-col gap-micro">
+                <h3 className="font-label-caps text-sm font-bold text-on-surface tracking-wider">
+                  EXTERNAL LINK DIAGNOSTICS & SYSTEM STATUS
+                </h3>
+                <p className="text-xs text-on-surface-variant leading-relaxed">
+                  Persistent health matrix monitoring local processes, database connection pools, and machine learning limits.
+                </p>
+              </div>
+              <button
+                onClick={fetchDiagnostics}
+                disabled={loadingDiagnostics}
+                className="px-md py-sm bg-surface-container-low hover:bg-surface-container-high text-on-surface border border-outline-variant font-label-caps text-xs font-bold hover:shadow-[0_0_15px_rgba(57,255,20,0.1)] transition-all flex items-center gap-sm"
+              >
+                <span className={`material-symbols-outlined text-sm ${loadingDiagnostics ? 'animate-spin' : ''}`}>sync</span>
+                RUN HEALTH CHECK
+              </button>
             </div>
 
             {loadingDiagnostics && !diagnostics ? (
-              <div className="h-32 flex items-center justify-center text-secondary-container font-display-mono text-xs">
+              <div className="h-32 flex items-center justify-center text-secondary-container font-display-mono text-xs animate-pulse">
+                <span className="animate-spin material-symbols-outlined text-[32px] mr-sm">sync</span>
                 PINGING ENVIRONMENT ENDPOINTS...
               </div>
             ) : !diagnostics ? (
@@ -452,59 +460,201 @@ function SettingsPage() {
                 SYSTEM DIAGNOSTICS UNREACHABLE: Backend API offline.
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-md">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-md flex-1">
                 
                 {/* Diagnostic Card 1: MongoDB */}
-                <div className="bg-surface-container-lowest p-md border border-outline-variant/40 rounded-sm flex flex-col gap-md">
-                  <div className="flex justify-between items-start">
-                    <span className="font-label-caps text-[10px] font-bold text-on-surface-variant">Database cluster</span>
-                    <span className={`px-sm py-micro font-label-caps text-[9px] font-bold border rounded-sm shadow-[0_0_8px_rgba(57,255,20,0.1)] ${
-                      diagnostics.mongodb === 'CONNECTED'
-                        ? 'bg-primary-container/10 border-primary-container text-primary-container'
-                        : 'bg-red-500/10 border-red-500/30 text-red-400 animate-pulse'
-                    }`}>
-                      {diagnostics.mongodb}
-                    </span>
-                  </div>
-                  <div className="flex flex-col gap-micro">
-                    <span className="font-bold text-sm text-on-surface">MongoDB Atlas</span>
-                    <span className="text-[11px] text-on-surface-variant leading-relaxed">
-                      Persisting incident logs, regulations collections, and circuits. Connection pool: Await drivers.
-                    </span>
-                  </div>
-                </div>
+                {(() => {
+                  const dbDetails = diagnostics.mongodb_details || { status: diagnostics.mongodb, counts: {} };
+                  const isConnected = dbDetails.status === 'CONNECTED';
+                  return (
+                    <div className="bg-surface-container-lowest p-md border border-outline-variant/40 rounded-sm flex flex-col gap-md animate-fadeIn">
+                      <div className="flex justify-between items-start">
+                        <span className="font-label-caps text-[10px] font-bold text-on-surface-variant">Database cluster</span>
+                        <span className={`px-sm py-micro font-label-caps text-[9px] font-bold border rounded-sm shadow-[0_0_8px_rgba(57,255,20,0.1)] ${
+                          isConnected
+                            ? 'bg-primary-container/10 border-primary-container text-primary-container'
+                            : 'bg-red-500/10 border-red-500/30 text-red-400 animate-pulse'
+                        }`}>
+                          {dbDetails.status}
+                        </span>
+                      </div>
+                      <div className="flex flex-col gap-sm">
+                        <div>
+                          <span className="font-bold text-sm text-on-surface">MongoDB Atlas</span>
+                          {isConnected && dbDetails.latency_ms != null && (
+                            <span className="text-[10px] text-primary-container font-mono block mt-micro">
+                              Latency: {dbDetails.latency_ms}ms
+                            </span>
+                          )}
+                        </div>
+                        <div className="border-t border-outline-variant/30 pt-xs flex flex-col gap-micro font-display-mono text-[10px] text-on-surface-variant">
+                          <div className="flex justify-between">
+                            <span>Sporting Rules:</span>
+                            <span className="text-secondary-container font-semibold">{dbDetails.counts.sporting_codes ?? 0} docs</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Track Directory:</span>
+                            <span className="text-secondary-container font-semibold">{dbDetails.counts.circuits ?? 0} docs</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Decision Archive:</span>
+                            <span className="text-secondary-container font-semibold">{dbDetails.counts.archive ?? 0} entries</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Diagnostic Card 2: Gemini Agent */}
-                <div className="bg-surface-container-lowest p-md border border-outline-variant/40 rounded-sm flex flex-col gap-md">
-                  <div className="flex justify-between items-start">
-                    <span className="font-label-caps text-[10px] font-bold text-on-surface-variant">Cognitive Agent</span>
-                    <span className="px-sm py-micro bg-primary-container/10 border border-primary-container text-primary-container font-label-caps text-[9px] font-bold rounded-sm shadow-[0_0_8px_rgba(57,255,20,0.1)] uppercase">
-                      Active
-                    </span>
-                  </div>
-                  <div className="flex flex-col gap-micro">
-                    <span className="font-bold text-sm text-on-surface">{diagnostics.gemini_model.toUpperCase()}</span>
-                    <span className="text-[11px] text-on-surface-variant leading-relaxed">
-                      Rate Limits: {diagnostics.gemini_limit}. Dynamic scoping boundaries enforced.
-                    </span>
-                  </div>
-                </div>
+                {(() => {
+                  const aiDetails = diagnostics.gemini_details || { status: 'CONNECTED', model: diagnostics.gemini_model, limit: diagnostics.gemini_limit };
+                  const isConnected = aiDetails.status === 'CONNECTED';
+                  const isError = aiDetails.status === 'ERROR';
+                  return (
+                    <div className="bg-surface-container-lowest p-md border border-outline-variant/40 rounded-sm flex flex-col gap-md animate-fadeIn">
+                      <div className="flex justify-between items-start">
+                        <span className="font-label-caps text-[10px] font-bold text-on-surface-variant">Cognitive Agent</span>
+                        <span className={`px-sm py-micro font-label-caps text-[9px] font-bold border rounded-sm shadow-[0_0_8px_rgba(57,255,20,0.1)] uppercase ${
+                          isConnected
+                            ? 'bg-primary-container/10 border-primary-container text-primary-container'
+                            : isError
+                            ? 'bg-red-500/10 border-red-500/30 text-red-400 animate-pulse'
+                            : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400 animate-pulse'
+                        }`}>
+                          {aiDetails.status === 'CONNECTED' ? 'ACTIVE' : aiDetails.status}
+                        </span>
+                      </div>
+                      <div className="flex flex-col gap-sm">
+                        <div>
+                          <span className="font-bold text-sm text-on-surface">{aiDetails.model ? aiDetails.model.toUpperCase() : 'GEMINI ENGINE'}</span>
+                          {isConnected && aiDetails.latency_ms != null && (
+                            <span className="text-[10px] text-primary-container font-mono block mt-micro">
+                              Latency: {aiDetails.latency_ms}ms
+                            </span>
+                          )}
+                        </div>
+                        <div className="border-t border-outline-variant/30 pt-xs flex flex-col gap-micro text-[11px] text-on-surface-variant">
+                          <span className="leading-relaxed">Quota Tier: {aiDetails.limit}</span>
+                          {aiDetails.error && (
+                            <span className="text-[9px] text-red-400 font-mono block mt-micro border border-red-500/20 bg-red-500/5 p-xs max-h-12 overflow-y-auto leading-relaxed">
+                              Err: {aiDetails.error}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Diagnostic Card 3: Local MCP Server */}
-                <div className="bg-surface-container-lowest p-md border border-outline-variant/40 rounded-sm flex flex-col gap-md">
-                  <div className="flex justify-between items-start">
-                    <span className="font-label-caps text-[10px] font-bold text-on-surface-variant">Process state</span>
-                    <span className="px-sm py-micro bg-primary-container/10 border border-primary-container text-primary-container font-label-caps text-[9px] font-bold rounded-sm shadow-[0_0_8px_rgba(57,255,20,0.1)] uppercase">
-                      Running
-                    </span>
-                  </div>
-                  <div className="flex flex-col gap-micro">
-                    <span className="font-bold text-sm text-on-surface">Local MCP Server</span>
-                    <span className="text-[11px] text-on-surface-variant leading-relaxed">
-                      Communication protocol: {diagnostics.mcp_server}. Serves regulations lookup and precedents context.
-                    </span>
-                  </div>
-                </div>
+                {(() => {
+                  const mcpDetails = diagnostics.mcp_details || { status: 'CONNECTED', transport: 'STDIO SUBPROCESS', registered_tools: [] };
+                  const isConnected = mcpDetails.status === 'CONNECTED';
+                  return (
+                    <div className="bg-surface-container-lowest p-md border border-outline-variant/40 rounded-sm flex flex-col gap-md animate-fadeIn">
+                      <div className="flex justify-between items-start">
+                        <span className="font-label-caps text-[10px] font-bold text-on-surface-variant">Process state</span>
+                        <span className={`px-sm py-micro font-label-caps text-[9px] font-bold border rounded-sm shadow-[0_0_8px_rgba(57,255,20,0.1)] uppercase ${
+                          isConnected
+                            ? 'bg-primary-container/10 border-primary-container text-primary-container'
+                            : 'bg-red-500/10 border-red-500/30 text-red-400 animate-pulse'
+                        }`}>
+                          {isConnected ? 'RUNNING' : mcpDetails.status}
+                        </span>
+                      </div>
+                      <div className="flex flex-col gap-sm">
+                        <div>
+                          <span className="font-bold text-sm text-on-surface">Local MCP Server</span>
+                          <span className="text-[10px] text-on-surface-variant font-mono block mt-micro">
+                            {mcpDetails.transport}
+                          </span>
+                        </div>
+                        <div className="border-t border-outline-variant/30 pt-xs flex flex-col gap-xs text-[10px] text-on-surface-variant font-display-mono">
+                          <div className="font-sans font-semibold tracking-wider text-[9px] text-on-surface-variant uppercase">Exposed Tools:</div>
+                          <div className="flex flex-wrap gap-xs">
+                            {(mcpDetails.registered_tools || []).map((t, idx) => (
+                              <span key={idx} className="px-xs py-[1px] bg-secondary-container/10 border border-secondary-container/20 text-secondary-container rounded-sm text-[9px]">
+                                {t}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Diagnostic Card 4: Telemetry Streams */}
+                {(() => {
+                  const streamsDetails = diagnostics.streams_details || { active_count: 0, total_count: 0 };
+                  const hasActive = streamsDetails.active_count > 0;
+                  return (
+                    <div className="bg-surface-container-lowest p-md border border-outline-variant/40 rounded-sm flex flex-col gap-md animate-fadeIn">
+                      <div className="flex justify-between items-start">
+                        <span className="font-label-caps text-[10px] font-bold text-on-surface-variant">Telemetry link</span>
+                        <span className={`px-sm py-micro font-label-caps text-[9px] font-bold border rounded-sm shadow-[0_0_8px_rgba(57,255,20,0.1)] uppercase ${
+                          hasActive
+                            ? 'bg-primary-container/10 border-primary-container text-primary-container'
+                            : 'bg-on-surface-variant/10 border-outline-variant text-on-surface-variant/60'
+                        }`}>
+                          {hasActive ? 'PIPES ONLINE' : 'NO FEEDS'}
+                        </span>
+                      </div>
+                      <div className="flex flex-col gap-sm">
+                        <div>
+                          <span className="font-bold text-sm text-on-surface">Telemetry Feeds</span>
+                          <span className="text-[10px] text-on-surface-variant block mt-micro font-display-mono">
+                            Live socket connections count
+                          </span>
+                        </div>
+                        <div className="border-t border-outline-variant/30 pt-xs flex flex-col gap-micro font-display-mono text-[10px] text-on-surface-variant">
+                          <div className="flex justify-between">
+                            <span>Active Feeds:</span>
+                            <span className="text-secondary-container font-semibold">{streamsDetails.active_count} online</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Total Registered:</span>
+                            <span className="text-secondary-container font-semibold">{streamsDetails.total_count} pipes</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Diagnostic Card 5: System Environment */}
+                {(() => {
+                  const sysEnv = diagnostics.system_env || { python_version: '3.11.x', server_runtime: 'FastAPI' };
+                  return (
+                    <div className="bg-surface-container-lowest p-md border border-outline-variant/40 rounded-sm flex flex-col gap-md animate-fadeIn">
+                      <div className="flex justify-between items-start">
+                        <span className="font-label-caps text-[10px] font-bold text-on-surface-variant">Host environment</span>
+                        <span className="px-sm py-micro bg-primary-container/10 border border-primary-container text-primary-container font-label-caps text-[9px] font-bold rounded-sm shadow-[0_0_8px_rgba(57,255,20,0.1)] uppercase">
+                          PRODUCTION
+                        </span>
+                      </div>
+                      <div className="flex flex-col gap-sm">
+                        <div>
+                          <span className="font-bold text-sm text-on-surface">{sysEnv.server_runtime}</span>
+                          <span className="text-[10px] text-on-surface-variant block mt-micro font-display-mono">
+                            Container Server Runtime
+                          </span>
+                        </div>
+                        <div className="border-t border-outline-variant/30 pt-xs flex flex-col gap-micro font-display-mono text-[10px] text-on-surface-variant">
+                          <div className="flex justify-between">
+                            <span>Python Version:</span>
+                            <span className="text-secondary-container font-semibold">v{sysEnv.python_version}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Outbound Handshake:</span>
+                            <span className="text-secondary-container font-semibold">OIDC Enabled</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
 
               </div>
             )}

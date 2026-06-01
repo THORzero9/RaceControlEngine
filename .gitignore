@@ -33,3 +33,6 @@ scratch/
 # OS Files
 .DS_Store
 Thumbs.db
+
+# Firebase Cache
+frontend/.firebase/

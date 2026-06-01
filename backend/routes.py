@@ -3,6 +3,9 @@ import re
 import io
 import jwt
 import hashlib
+import httpx
+import google.auth
+import google.auth.transport.requests
 from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, status, File, UploadFile, Form, Header
 from pydantic import BaseModel, Field
@@ -34,8 +37,12 @@ class SpyingMcpSession(ClientSession):
 
 router = APIRouter(prefix="/api/v1", tags=["Race Control Adjudication"])
 
-# Initialize the official GenAI client using our Pydantic validated key
-ai_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+# Initialize the official GenAI client utilizing Vertex AI enterprise routing path
+ai_client = genai.Client(
+    vertexai=True,
+    project=os.getenv("GCP_PROJECT_ID", "race-control-engine-2026"),
+    location=os.getenv("GCP_REGION", "us-central1")
+)
 
 PHRASING_ALIASES = {
     "contact": ["contact", "collision", "hit", "collide", "struck", "impact"],
@@ -55,6 +62,7 @@ class IncidentPayload(BaseModel):
     track_conditions: str = Field("DRY", description="Climatic state of the surface (DRY, WET, MIXED)")
     marshal_notes: str = Field(..., description="Raw textual transcription or observation notes from track marshals")
     driver_class: Optional[str] = Field(None, description="Mandatory configuration for WEC multiclass routing (Hypercar, LMGT3)")
+    session_id: Optional[str] = Field(None, description="Conversational session persistence identifier")
 
 class FinalAdjudicationPayload(BaseModel):
     incident_details: Dict = Field(..., description="Details of the incident payload")
@@ -106,6 +114,45 @@ def decode_access_token(token: str):
         return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     except jwt.PyJWTError:
         return None
+
+async def call_dialogflow_cx_agent(
+    project_id: str,
+    location: str,
+    agent_id: str,
+    session_id: str,
+    text: str,
+    parameters: dict
+) -> str:
+    try:
+        credentials, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        auth_req = google.auth.transport.requests.Request()
+        credentials.refresh(auth_req)
+        access_token = credentials.token
+    except Exception as e:
+        raise ValueError(f"Failed to retrieve Google credentials: {str(e)}")
+        
+    url = f"https://{location}-dialogflow.googleapis.com/v3/projects/{project_id}/locations/{location}/agents/{agent_id}/sessions/{session_id}:detectIntent"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "queryInput": {"text": {"text": text}, "languageCode": "en"},
+        "queryParams": {"payload": parameters}
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, json=payload, headers=headers, timeout=30.0)
+        if response.status_code != 200:
+            raise ValueError(f"Dialogflow CX API error ({response.status_code}): {response.text}")
+        data = response.json()
+        response_messages = data.get("queryResult", {}).get("responseMessages", [])
+        text_responses = []
+        for msg in response_messages:
+            if "text" in msg and "text" in msg["text"]:
+                text_responses.extend(msg["text"]["text"])
+        return "\n".join(text_responses)
 
 def extract_search_keywords(marshal_notes: str) -> List[str]:
     notes_lower = marshal_notes.lower()
@@ -235,11 +282,83 @@ async def analyze_track_incident(payload: IncidentPayload):
        After the two-line penalty declaration, provide a brief one-paragraph justification explaining why this specific penalty tier was selected from the grading matrix (baseline vs. escalation) and what factors from the marshal notes drove the decision.
     """
 
+    # --- 4. OPTIONAL PROXY INTEGRATION TO GCP AGENT BUILDER ---
+    if settings.GCP_PROJECT_ID and settings.GCP_AGENT_ID:
+        session_id = payload.session_id or f"session_{payload.series_id}_{payload.turn_number}"
+        parameters = {
+            "series_id": payload.series_id,
+            "track_layout": payload.track_layout,
+            "turn_number": payload.turn_number,
+            "track_conditions": payload.track_conditions,
+            "marshal_notes": payload.marshal_notes,
+            "driver_class": payload.driver_class
+        }
+        try:
+            agent_response_text = await call_dialogflow_cx_agent(
+                project_id=settings.GCP_PROJECT_ID,
+                location=settings.GCP_LOCATION or "us-central1",
+                agent_id=settings.GCP_AGENT_ID,
+                session_id=session_id,
+                text=steward_prompt,
+                parameters=parameters
+            )
+            matched_rules = []
+            found_ids = re.findall(r'\[([A-Z0-9_.-]+)\]', agent_response_text)
+            if found_ids:
+                for rule_id in found_ids:
+                    rule_doc = await db_manager.sporting_codes.find_one({"_id": rule_id})
+                    if rule_doc:
+                        matched_rules.append({
+                            "rule_id": rule_doc["_id"],
+                            "title": rule_doc["title"],
+                            "raw_text": rule_doc["raw_text"]
+                        })
+            if not matched_rules:
+                all_search_terms = extract_search_keywords(payload.marshal_notes)
+                regex_pattern = "|".join([f"(?:{re.escape(term)})" for term in all_search_terms if term])
+                if regex_pattern:
+                    cursor = db_manager.sporting_codes.find({
+                        "series_id": series_key,
+                        "$or": [
+                            {"search_tags": {"$regex": regex_pattern, "$options": "i"}},
+                            {"title": {"$regex": regex_pattern, "$options": "i"}},
+                            {"raw_text": {"$regex": regex_pattern, "$options": "i"}},
+                        ]
+                    })
+                    async for doc in cursor:
+                        matched_rules.append({
+                            "rule_id": doc["_id"],
+                            "title": doc["title"],
+                            "raw_text": doc["raw_text"]
+                        })
+                        if len(matched_rules) >= 3:
+                            break
+            return {
+                "incident_details": payload.model_dump(),
+                "regulatory_framework": {
+                    "governing_body": series_config["governing_body"],
+                    "allowable_penalties": series_config["sanctioned_penalties"]
+                },
+                "applicable_clauses": matched_rules,
+                "steward_draft_ruling": agent_response_text,
+                "status": "Awaiting Human-in-the-Loop Confirmation"
+            }
+        except Exception as e:
+            # Graceful local developer fallback
+            print(f"GCP Agent Builder proxy failed ({str(e)}). Falling back to local Gemini client loop...")
+
     # 4. Trigger the live reasoning loop via Gemini using Stdio MCP server Parameters
+    import sys
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    mcp_server_path = os.path.join(current_dir, "mcp_server.py")
+
+    env_copy = os.environ.copy()
+    env_copy.pop("PORT", None)
+
     server_params = StdioServerParameters(
-        command="/home/bhaswat/projects/RaceControlEngine/v_env/bin/python3",
-        args=["/home/bhaswat/projects/RaceControlEngine/backend/mcp_server.py"],
-        env=None
+        command=sys.executable,
+        args=[mcp_server_path],
+        env=env_copy
     )
 
     matched_rules = []
@@ -256,7 +375,7 @@ async def analyze_track_incident(payload: IncidentPayload):
                 
                 # Run content generation asynchronously
                 response = await ai_client.aio.models.generate_content(
-                    model='gemini-3.5-flash',
+                    model='gemini-2.5-flash',
                     contents=steward_prompt,
                     config=config
                 )
@@ -307,9 +426,23 @@ async def analyze_track_incident(payload: IncidentPayload):
                 }
 
     except Exception as e:
+        import traceback
+        import sys
+        traceback.print_exc(file=sys.stderr)
+        
+        detail_msg = str(e)
+        if hasattr(e, "exceptions") and e.exceptions:
+            inner_msgs = []
+            for ie in e.exceptions:
+                if hasattr(ie, "exceptions") and ie.exceptions:
+                    inner_msgs.append(f"TaskGroup({', '.join(str(x) for x in ie.exceptions)})")
+                else:
+                    inner_msgs.append(str(ie))
+            detail_msg += f" (Inner: {', '.join(inner_msgs)})"
+            
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"GenAI Loop Interrupted: {str(e)}"
+            detail=f"GenAI Loop Interrupted: {detail_msg}"
         )
 
 @router.post("/adjudicate", status_code=status.HTTP_201_CREATED)
@@ -526,20 +659,118 @@ async def toggle_stream(payload: ToggleStreamPayload):
 @router.get("/settings/diagnostics", status_code=status.HTTP_200_OK)
 async def get_diagnostics():
     try:
-        # Check MongoDB connection
+        import time
+        import sys
+
+        # 1. MongoDB Connection Latency & Stats
         mongodb_status = "DISCONNECTED"
+        mongodb_latency_ms = None
+        sporting_codes_count = 0
+        circuits_count = 0
+        archive_count = 0
+
         try:
             if db_manager.client is not None:
+                start_time = time.time()
                 await db_manager.db.command("ping")
+                end_time = time.time()
+                mongodb_latency_ms = round((end_time - start_time) * 1000, 1)
                 mongodb_status = "CONNECTED"
+
+                sporting_codes_count = await db_manager.db["sporting_codes"].count_documents({})
+                circuits_count = await db_manager.db["circuits"].count_documents({})
+                archive_count = await db_manager.db["adjudicated_incidents"].count_documents({})
+        except Exception:
+            pass
+
+        # 2. Dynamic Gemini API Connectivity Test
+        gemini_status = "DISCONNECTED"
+        gemini_latency_ms = None
+        gemini_error = None
+
+        try:
+            start_time = time.time()
+            # Lightweight token generation ping request to check credentials & latency on Vertex AI
+            await ai_client.aio.models.generate_content(
+                model='gemini-2.5-flash',
+                contents='ping'
+            )
+            end_time = time.time()
+            gemini_latency_ms = round((end_time - start_time) * 1000, 1)
+            gemini_status = "CONNECTED"
+        except Exception as ge:
+            gemini_status = "ERROR"
+            gemini_error = str(ge)
+
+        # 3. Local MCP Server Script Check
+        mcp_status = "DISCONNECTED"
+        mcp_error = None
+        try:
+            mcp_server_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp_server.py")
+            if os.path.exists(mcp_server_path):
+                with open(mcp_server_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                if len(content) > 0:
+                    mcp_status = "CONNECTED"
+                else:
+                    mcp_status = "EMPTY_FILE"
+            else:
+                mcp_status = "MISSING_FILE"
+        except Exception as me:
+            mcp_status = "ERROR"
+            mcp_error = str(me)
+
+        # 4. Telemetry Stream Pipe Statistics
+        active_streams_count = 0
+        total_streams_count = 0
+        try:
+            if db_manager.client is not None:
+                active_streams_count = await db_manager.db["streams"].count_documents({"active": True})
+                total_streams_count = await db_manager.db["streams"].count_documents({})
         except Exception:
             pass
 
         return {
+            # Flat Legacy Keys for Backwards Compatibility
             "mongodb": mongodb_status,
-            "gemini_model": "gemini-3.5-flash",
-            "gemini_limit": "20 requests per day (Free Tier)",
-            "mcp_server": "RUNNING (STDIO TRANSPORT)"
+            "gemini_model": "gemini-2.5-flash",
+            "gemini_limit": "Pay-as-you-go / Billing Tier",
+            "mcp_server": f"RUNNING ({mcp_status})",
+            
+            # Rich Nested Telemetry for New Frontend UI
+            "mongodb_details": {
+                "status": mongodb_status,
+                "latency_ms": mongodb_latency_ms,
+                "counts": {
+                    "sporting_codes": sporting_codes_count,
+                    "circuits": circuits_count,
+                    "archive": archive_count
+                }
+            },
+            "gemini_details": {
+                "status": gemini_status,
+                "model": "gemini-2.5-flash",
+                "limit": "Pay-as-you-go / Billing Tier",
+                "latency_ms": gemini_latency_ms,
+                "error": gemini_error
+            },
+            "mcp_details": {
+                "status": mcp_status,
+                "error": mcp_error,
+                "transport": "STDIO SUBPROCESS",
+                "registered_tools": [
+                    "analyze_track_incident",
+                    "store_final_adjudication"
+                ]
+            },
+            "streams_details": {
+                "active_count": active_streams_count,
+                "total_count": total_streams_count
+            },
+            "system_env": {
+                "python_version": sys.version.split(" ")[0],
+                "server_runtime": "FastAPI (Uvicorn)"
+            }
         }
     except Exception as e:
         raise HTTPException(

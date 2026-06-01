@@ -1,0 +1,3 @@
+[[build.env]]
+name = "GOOGLE_PYTHON_PACKAGE_MANAGER"
+value = "pip"

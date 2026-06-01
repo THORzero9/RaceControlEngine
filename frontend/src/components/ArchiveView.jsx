@@ -9,6 +9,37 @@ function ArchiveView() {
   const [selectedIncident, setSelectedIncident] = useState(null);
   const [expandedClauses, setExpandedClauses] = useState({});
 
+  const formatPenaltyAction = (incident) => {
+    if (!incident) return 'N/A';
+    const type = incident.penalty_type || 'N/A';
+    const val = incident.penalty_value;
+    const typeUpper = type.toUpperCase();
+    
+    if (typeUpper.includes('TIME')) {
+      return val ? `${val}S TIME PENALTY` : 'TIME PENALTY';
+    }
+    if (typeUpper.includes('LAP')) {
+      if (val === 2) return 'DOUBLE LONG LAP';
+      return val ? `${val}X LONG LAP` : 'LONG LAP';
+    }
+    if (typeUpper.includes('STOP') && typeUpper.includes('GO')) {
+      if (typeUpper.includes('HOLD') || typeUpper.includes('STOP & GO HOLD') || typeUpper.includes('STOP_GO_HOLD')) {
+        return val ? `${val}S HOLD STOP & GO` : 'STOP & GO HOLD';
+      }
+      return val ? `STOP & GO (${val}s)` : 'STOP & GO';
+    }
+    if (typeUpper.includes('DRIVE') || typeUpper.includes('THROUGH')) {
+      return 'DRIVE THROUGH';
+    }
+    if (typeUpper.includes('POSITION') || typeUpper.includes('DROP')) {
+      return val ? `DROP ${val} POSITIONS` : 'POSITION DROP';
+    }
+    if (typeUpper.includes('WARNING') || typeUpper.includes('REPRIMAND')) {
+      return 'WARNING / REPRIMAND';
+    }
+    return val ? `${type} (${val})` : type;
+  };
+
   const toggleClause = (id) => {
     setExpandedClauses(prev => ({
       ...prev,
@@ -281,7 +312,7 @@ function ArchiveView() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-md text-xs">
                     <div>
                       <span className="text-on-surface-variant block uppercase text-[9px] font-label-caps">Penalty Action Applied</span>
-                      <span className="text-amber-400 font-semibold uppercase">{selectedIncident.penalty_type || 'N/A'} {selectedIncident.penalty_value ? `(${selectedIncident.penalty_value}s)` : ''}</span>
+                      <span className="text-amber-400 font-semibold uppercase">{formatPenaltyAction(selectedIncident)}</span>
                     </div>
                     {selectedIncident.steward_notes && (
                       <div className="md:col-span-2">

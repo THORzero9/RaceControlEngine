@@ -1,0 +1,6 @@
+MONGO_URI="your_mongodb_atlas_production_connection_string"
+MONGO_DB_NAME="RaceControl_Core"
+GEMINI_API_KEY="your_production_google_gemini_api_key"
+JWT_SECRET="<Run the command below to generate a secure random string>"
+PASSWORD_SALT="<Run the command below to generate a secure random string>"
+CORS_ORIGINS="https://your-firebase-frontend-app.web.app"

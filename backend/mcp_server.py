@@ -1,10 +1,18 @@
 import os
 import sys
-import re
-from typing import List, Dict
 
 # Ensure project root is in python path for absolute imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import re
+from typing import List, Dict
+import uvicorn
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
+from starlette.requests import Request
+from backend.config import settings
 
 from mcp.server.fastmcp import FastMCP
 
@@ -144,5 +152,35 @@ async def get_incident_precedents(circuit: str, turn_number: int, series_id: str
         
     return "\n".join(formatted)
 
+class GoogleCloudAuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if settings.GCP_AUDIENCE:
+            if request.url.path in ["/health", "/"]:
+                return await call_next(request)
+                
+            auth_header = request.headers.get("authorization")
+            if not auth_header or not auth_header.lower().startswith("bearer "):
+                return JSONResponse({"detail": "Unauthorized: Missing Bearer Token"}, status_code=401)
+            
+            token = auth_header.split(" ")[1]
+            try:
+                id_token.verify_oauth2_token(token, google_requests.Request(), settings.GCP_AUDIENCE)
+            except Exception as e:
+                return JSONResponse({"detail": f"Unauthorized: {str(e)}"}, status_code=401)
+                
+        return await call_next(request)
+
 if __name__ == "__main__":
-    mcp.run()
+    port_env = os.environ.get("PORT")
+    if port_env:
+        mcp.settings.port = int(port_env)
+        mcp.settings.host = "0.0.0.0"
+        mcp.settings.transport_security.allowed_hosts = ["*"]
+        mcp.settings.transport_security.allowed_origins = ["*"]
+        
+        starlette_app = mcp.sse_app()
+        starlette_app.add_middleware(GoogleCloudAuthMiddleware)
+        
+        uvicorn.run(starlette_app, host="0.0.0.0", port=int(port_env))
+    else:
+        mcp.run()

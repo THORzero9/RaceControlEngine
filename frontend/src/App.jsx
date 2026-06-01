@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import RegulationsView from './components/RegulationsView';
 import ArchiveView from './components/ArchiveView';
@@ -353,12 +353,10 @@ function App() {
     });
   }, [penaltyType, penaltyValue, isEditing]);
 
-  // Handle click on sanction chips (only active when isEditing is true)
-  const handleChipClick = (penalty) => {
-    if (!isEditing) return; // Gate check: do nothing if isEditing is FALSE
-
-    setChosenAdjudication(penalty);
-
+  // Synchronizes the internal penaltyType and penaltyValue states with a text penalty choice
+  const syncPenaltyStateFromChosen = (penalty) => {
+    if (!penalty) return;
+    
     // Extract numerical value
     let val = 5; // default
     const numMatch = penalty.match(/\d+/);
@@ -403,6 +401,13 @@ function App() {
 
     setPenaltyValue(val);
     setPenaltyType(mappedType);
+  };
+
+  // Handle click on sanction chips (only active when isEditing is true)
+  const handleChipClick = (penalty) => {
+    if (!isEditing) return; // Gate check: do nothing if isEditing is FALSE
+    setChosenAdjudication(penalty);
+    syncPenaltyStateFromChosen(penalty);
   };
 
   // Update form fields dynamically when changing the championship series
@@ -460,11 +465,13 @@ function App() {
       const parsedPenalties = normalizePenalties(data.regulatory_framework?.allowable_penalties);
       // Parse the recommended penalty from the Gemini text or default to the first sanctioned penalty
       const parsedPenalty = parseProposedAdjudication(data.steward_draft_ruling, parsedPenalties);
+      
+      let selectedPen = parsedPenalties[0] || '5S TIME PENALTY';
       if (parsedPenalty) {
-        setChosenAdjudication(parsedPenalty);
-      } else {
-        setChosenAdjudication(parsedPenalties[0] || '5S TIME PENALTY');
+        selectedPen = parsedPenalty;
       }
+      setChosenAdjudication(selectedPen);
+      syncPenaltyStateFromChosen(selectedPen);
     } catch (err) {
       console.error(err);
       setError(err.message || 'Network connection failed.');
@@ -483,9 +490,50 @@ function App() {
   const governingBody = backendResponse?.regulatory_framework?.governing_body || activeTemplate.governing_body;
   const governingLogo = activeTemplate.governing_logo;
   const standbyRules = allRegulations.filter(r => r.series_id.toUpperCase() === seriesId.toUpperCase());
-  const applicableClauses = backendResponse?.applicable_clauses || standbyRules;
-  const allowablePenalties = normalizePenalties(backendResponse?.regulatory_framework?.allowable_penalties || activeTemplate.allowable_penalties);
   const draftRuling = backendResponse?.steward_draft_ruling;
+
+  const activeRulingText = useMemo(() => {
+    return isEditing ? editedRulingText : (backendResponse?.steward_draft_ruling || '');
+  }, [isEditing, editedRulingText, backendResponse?.steward_draft_ruling]);
+
+  const rawRuleIds = useMemo(() => {
+    return extractRuleIdsFromText(activeRulingText);
+  }, [activeRulingText]);
+
+  const applicableClauses = useMemo(() => {
+    // If analysis hasn't run yet, show the standby rules (all regulations for this series)
+    if (!backendResponse) {
+      return standbyRules;
+    }
+
+    // If analysis has run, we only show the ones that are matching (cited)
+    if (rawRuleIds.length === 0) {
+      return backendResponse?.applicable_clauses || [];
+    }
+
+    const sourceRules = standbyRules.length > 0 ? standbyRules : (backendResponse?.applicable_clauses || []);
+    const matched = [];
+    const matchedCleanedIds = new Set();
+
+    rawRuleIds.forEach((rawId) => {
+      const targetClean = cleanRuleIdForMatching(rawId);
+      if (!targetClean) return;
+
+      const rule = sourceRules.find(r => {
+        const rId = r.rule_id || r._id || '';
+        return cleanRuleIdForMatching(rId) === targetClean;
+      });
+
+      if (rule && !matchedCleanedIds.has(targetClean)) {
+        matched.push(rule);
+        matchedCleanedIds.add(targetClean);
+      }
+    });
+
+    return matched;
+  }, [backendResponse, standbyRules, rawRuleIds]);
+
+  const allowablePenalties = normalizePenalties(backendResponse?.regulatory_framework?.allowable_penalties || activeTemplate.allowable_penalties);
 
   const filteredCircuits = circuits.filter(c => c.championship.toUpperCase() === seriesId.toUpperCase());
   const activeCircuit = filteredCircuits.find(c => c.name.toUpperCase() === trackLayout.toUpperCase());
@@ -500,7 +548,7 @@ function App() {
     const payload = {
       incident_details: backendResponse.incident_details,
       regulatory_framework: backendResponse.regulatory_framework,
-      applicable_clauses: backendResponse.applicable_clauses,
+      applicable_clauses: applicableClauses,
       steward_draft_ruling: isEditing ? editedRulingText : backendResponse.steward_draft_ruling,
       final_status: isEditing ? 'AMENDED' : 'APPROVED',
       steward_notes: `Approved by Steward ${user ? user.name : 'Unknown'}. Chosen Adjudication: ${chosenAdjudication}`,
@@ -528,9 +576,6 @@ function App() {
           ? 'Amended Judgment Logged Safely to Archive Cluster.'
           : 'Incident Judgment Logged Safely to Archive Cluster.'
       });
-      alert(isEditing 
-        ? 'Amended Judgment Logged Safely to Archive Cluster.'
-        : 'Incident Judgment Logged Safely to Archive Cluster.');
       setTimeout(() => setSystemAlert(null), 5000);
       setIsEditing(false);
       setAdjudicationArchived(true);
@@ -1009,13 +1054,21 @@ function App() {
                     />
                   ) : isLoading ? (
                     <div className="flex-1 p-md overflow-y-auto scrolling-terminal font-data-md text-xs text-primary-container leading-relaxed">
-                      <div className="flex flex-col gap-sm">
+                      <div className="flex flex-col gap-sm font-mono text-[10px]">
                         <span className="text-secondary-container font-semibold">// INGESTING INCIDENT TELEMETRY SNAPSHOT...</span>
-                        <span className="text-on-surface-variant font-semibold">// CONTACT KEYWORDS DETECTED: [contact, forced, speed]</span>
                         <span className="text-on-surface-variant">// CORRELATING REGULATIONS UNDER {governingBody}...</span>
-                        <span className="text-on-surface-variant">// TRIGGERING REASONING LOOP (GEMINI 3.5 FLASH)...</span>
-                        <div className="w-16 h-1 mt-md bg-secondary-container/25 overflow-hidden relative">
-                          <div className="w-1/2 h-full bg-secondary-container absolute top-0 left-0 animate-[shimmer_1.5s_infinite]"></div>
+                        <span className="text-on-surface-variant">// RUNNING MULTI-AGENT COORDINATION MESH...</span>
+                        <span className="text-on-surface-variant">// RESOLVING PRECEDENTS & GRADED PENALTY WINDOW...</span>
+                        <span className="text-on-surface-variant">// COMPILING FINAL ADJUDICATION DRAFT...</span>
+                        
+                        <div className="flex justify-center mt-lg">
+                          <pre className="animate-spin text-secondary-container font-mono text-[14px] select-none leading-none inline-block origin-center">
+{`     .---.     
+   /   |   \\   
+  | -- O -- |  
+   \\   |   /   
+     '---'     `}
+                          </pre>
                         </div>
                       </div>
                     </div>
@@ -1168,6 +1221,50 @@ function App() {
 
     </div>
   );
+}
+
+function cleanRuleIdForMatching(id) {
+  if (!id) return '';
+  let clean = id.toUpperCase()
+    .replace(/^(?:F1|MOTOGP|WEC)[_\s]*/i, '')
+    .replace(/^(?:ARTICLES?|APPENDIX|APPENDICES)[_\s]*/i, '')
+    .replace(/[^A-Z0-9]/g, '.');
+  clean = clean.replace(/[\.+]+/g, '.').replace(/^\.|\.$/g, '');
+  return clean;
+}
+
+function extractRuleIdsFromText(text) {
+  if (!text) return [];
+  const citationSectionRegex = /(?:CITATION|Rule Citation)[\s\S]*?(?:PROPOSED ADJUDICATION|$)/i;
+  const sectionMatch = text.match(citationSectionRegex);
+  const searchArea = sectionMatch ? sectionMatch[0] : text;
+
+  const matches = [];
+  
+  // 1. Matches like F1_ARTICLE_7_2, WEC_ARTICLE_9_1_11, F1_APPENDIX_B, etc.
+  const regex1 = /(?:F1|MOTOGP|WEC)_(?:ARTICLE|APPENDIX|APPENDICES)_[A-Z0-9_]+/gi;
+  let match;
+  while ((match = regex1.exec(searchArea)) !== null) {
+    matches.push(match[0].toUpperCase());
+  }
+
+  // 2. Matches like "Article 12.2.2" or "Appendix B" or "Articles 9.1.11"
+  const regex2 = /(?:F1|MOTOGP|WEC)?\s*(?:Articles?|Appendix|Appendices)\s+[A-Z0-9_]+(?:\.[A-Z0-9_]+)*/gi;
+  while ((match = regex2.exec(searchArea)) !== null) {
+    matches.push(match[0].toUpperCase());
+  }
+
+  // Deduplicate matches while preserving order
+  const uniqueMatches = [];
+  const seen = new Set();
+  matches.forEach(m => {
+    if (!seen.has(m)) {
+      seen.add(m);
+      uniqueMatches.push(m);
+    }
+  });
+
+  return uniqueMatches;
 }
 
 export default App;
