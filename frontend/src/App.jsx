@@ -359,13 +359,41 @@ function App() {
     const typeUpper = String(penaltyType).toUpperCase();
     const headerBand = `### PENALTY ADJUDICATION: ${penaltyValue} ${typeUpper}\n\n`;
 
+    const mapPenaltyTypeToCode = (type) => {
+      const t = String(type).toLowerCase();
+      if (t.includes("time")) return "TIME_PENALTY";
+      if (t.includes("stop") && t.includes("go") && t.includes("hold")) return "STOP_GO_HOLD";
+      if (t.includes("stop") && t.includes("go")) return "STOP_GO";
+      if (t.includes("drive")) return "DRIVE_THROUGH";
+      if (t.includes("long")) return "LONG_LAP_PENALTY";
+      if (t.includes("position")) return "POSITION_DROP";
+      if (t.includes("warning") || t.includes("reprimand")) return "WARNING";
+      return String(type).toUpperCase().replace(/\s+/g, '_');
+    };
+
+    const getIncrementString = (type, val) => {
+      const t = String(type).toLowerCase();
+      if (t.includes("time")) return `${val} seconds`;
+      if (t.includes("long")) return `${val}x Long Lap`;
+      if (t.includes("stop") && t.includes("go")) return `${val}s hold`;
+      if (t.includes("position")) return `${val} Positions`;
+      return `${val}`;
+    };
+
     setEditedRulingText((prevText) => {
       const prefixPattern = /^### PENALTY ADJUDICATION:[^\n]*\n\n/;
-      if (prefixPattern.test(prevText)) {
-        return prevText.replace(prefixPattern, headerBand);
+      let updatedText = prevText;
+      if (prefixPattern.test(updatedText)) {
+        updatedText = updatedText.replace(prefixPattern, headerBand);
       } else {
-        return headerBand + prevText;
+        updatedText = headerBand + updatedText;
       }
+
+      const typeCode = mapPenaltyTypeToCode(penaltyType);
+      const incStr = getIncrementString(penaltyType, penaltyValue);
+      const propAdjudicationPattern = /(### PROPOSED ADJUDICATION\s*\n\s*\*\*PENALTY_TYPE:\*\*\s*)[^\n]*(\s*\n\s*\*\*INCREMENT:\*\*\s*)[^\n]*/;
+      
+      return updatedText.replace(propAdjudicationPattern, `$1${typeCode}$2${incStr}`);
     });
   }, [penaltyType, penaltyValue, isEditing]);
 
