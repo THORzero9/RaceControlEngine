@@ -8,8 +8,10 @@ The system combines a non-blocking FastAPI backend, a React/Tailwind visual cock
 
 ## Key System Architecture
 
-### 1. Agentic Adjudication Loop & Analytical Reasoner
-* **Asynchronous Execution Loop**: Invokes Gemini with dynamic tool capabilities over an MCP studio channel.
+### 1. Agentic Adjudication Loop & Real-Time Event Streaming
+* **Server-Sent Events (SSE) Streaming**: Supports real-time streaming of both the agent's internal thinking logs (MCP tool executions, keyword searches, precedent lookups) and raw Markdown ruling tokens sequentially.
+* **RAG Precedents & Series Isolation**: Queries, scores, and injects relevant historical incident precedents from the database. Prevents cross-contamination by strictly isolating lookups to the governing series' boundaries (F1, MotoGP, WEC).
+* **Mathematical Telemetry Delta Calculator**: Computes physical variances (deltas) between baseline track telemetry (braking points, apex speeds) and incident telemetry in real-time, injecting delta calculations into the LLM system prompt.
 * **Custom MCP Session Interceptor**: Integrates custom tool intercepts to capture exact sporting article IDs and extract matching regulatory clauses.
 * **Dynamic Scoping Boundaries**: Restricts the model's search spaces to on-track behavior, track limits, and driving standards, preventing paddock logistics or clothing regulations from polluting the UI.
 
@@ -22,6 +24,9 @@ The system combines a non-blocking FastAPI backend, a React/Tailwind visual cock
 * **Secure Entry Gate**: State-intercepted LoginPage requiring authentication before viewport access is authorized.
 * **Steward Dossier Profile**: Displays the steward's active role badge (`CHIEF_STEWARD`), ST ID, and series clearances (F1, MotoGP, WEC).
 * **Signed Adjudication Journal**: Pulls logs from the Atlas database and isolates the adjudications officially approved by the logged-in steward.
+* **Draggable Workspace Grid**: Fully responsive three-column grid featuring hover-reactive resizer handles, allowing stewards to dynamically adjust panel widths.
+* **High-Fidelity Telemetry Loader**: Custom WebGL 3D floor grid paired with a vector telemetry tracer displaying glowing neon comets lapping Spa-Francorchamps at a steady, premium pace.
+* **Low-Profile Copy Button**: Tactical `[⎘ Copy Report]` utility with a 2-second visual feedback timeout.
 
 ---
 
