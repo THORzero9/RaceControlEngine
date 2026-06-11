@@ -26,7 +26,7 @@ async def ensure_db():
     from backend.database import db_manager
     if not db_connected:
         if db_manager.client is None:
-            await db_manager.connect_to_database()
+            await db_manager.connect_to_database(seed=False, max_pool_size=1, min_pool_size=1)
         db_connected = True
     return db_manager
 

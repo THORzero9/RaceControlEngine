@@ -217,6 +217,8 @@ function App() {
   
   // State hook for backend response (default: null)
   const [backendResponse, setBackendResponse] = useState(null);
+  const [draftRuling, setDraftRuling] = useState('');
+  const [copied, setCopied] = useState(false);
 
   // Editing State
   const [isEditing, setIsEditing] = useState(false);
@@ -232,6 +234,7 @@ function App() {
 
   // 2. UI / Application States
   const [isLoading, setIsLoading] = useState(false);
+  const [thinkingLogs, setThinkingLogs] = useState([]);
   const [error, setError] = useState(null);
   const [currentTime, setCurrentTime] = useState('');
   const [systemAlert, setSystemAlert] = useState(null);
@@ -244,6 +247,19 @@ function App() {
   // Archive data hooks
   const [archivedIncidents, setArchivedIncidents] = useState([]);
   const [loadingArchive, setLoadingArchive] = useState(false);
+
+  // Precedent and Telemetry Calculator States
+  const [citedPrecedentIds, setCitedPrecedentIds] = useState([]);
+  const [citedPrecedents, setCitedPrecedents] = useState([]);
+  const [telemetryAnalysis, setTelemetryAnalysis] = useState(null);
+  const [selectedPrecedentForModal, setSelectedPrecedentForModal] = useState(null);
+
+  // Isolated saving state
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Adjustable column widths (in pixels)
+  const [col1Width, setCol1Width] = useState(310);
+  const [col2Width, setCol2Width] = useState(440);
 
   // Real-time UTC race clock (ticks every 1000ms, formats as HH:MM:SS UTC using system time)
   useEffect(() => {
@@ -428,12 +444,62 @@ function App() {
     }
   };
 
+  // Draggable column resizing handlers
+  const startResizingCol1 = (mouseDownEvent) => {
+    mouseDownEvent.preventDefault();
+    const startWidth = col1Width;
+    const startX = mouseDownEvent.clientX;
+
+    const doDrag = (mouseMoveEvent) => {
+      const deltaX = mouseMoveEvent.clientX - startX;
+      const newWidth = Math.max(280, Math.min(450, startWidth + deltaX));
+      setCol1Width(newWidth);
+    };
+
+    const stopDrag = () => {
+      document.removeEventListener('mousemove', doDrag);
+      document.removeEventListener('mouseup', stopDrag);
+    };
+
+    document.addEventListener('mousemove', doDrag);
+    document.addEventListener('mouseup', stopDrag);
+  };
+
+  const startResizingCol2 = (mouseDownEvent) => {
+    mouseDownEvent.preventDefault();
+    const startWidth = col2Width;
+    const startX = mouseDownEvent.clientX;
+
+    const doDrag = (mouseMoveEvent) => {
+      const deltaX = mouseMoveEvent.clientX - startX;
+      const newWidth = Math.max(320, Math.min(700, startWidth + deltaX));
+      setCol2Width(newWidth);
+    };
+
+    const stopDrag = () => {
+      document.removeEventListener('mousemove', doDrag);
+      document.removeEventListener('mouseup', stopDrag);
+    };
+
+    document.addEventListener('mousemove', doDrag);
+    document.addEventListener('mouseup', stopDrag);
+  };
+
   // Perform API Post Call to investigation endpoint
   const runCopilotAnalysis = async () => {
     setIsLoading(true);
+    setThinkingLogs([
+      "Ingesting incident telemetry snapshot...",
+      `Correlating regulations under ${seriesId === 'F1' ? 'FIA' : seriesId === 'MotoGP' ? 'FIM' : 'FIA / ACO'}...`
+    ]);
     setError(null);
     setSystemAlert(null);
     setAdjudicationArchived(false);
+    setDraftRuling('');
+    setEditedRulingText('');
+    setCitedPrecedentIds([]);
+    setCitedPrecedents([]);
+    setTelemetryAnalysis(null);
     
     // Construct exact IncidentPayload
     const payload = {
@@ -459,19 +525,63 @@ function App() {
         throw new Error(errorData?.detail || `Server error: ${response.status}`);
       }
 
-      const data = await response.json();
-      setBackendResponse(data);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+      let accumulatedText = "";
 
-      const parsedPenalties = normalizePenalties(data.regulatory_framework?.allowable_penalties);
-      // Parse the recommended penalty from the Gemini text or default to the first sanctioned penalty
-      const parsedPenalty = parseProposedAdjudication(data.steward_draft_ruling, parsedPenalties);
-      
-      let selectedPen = parsedPenalties[0] || '5S TIME PENALTY';
-      if (parsedPenalty) {
-        selectedPen = parsedPenalty;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop(); // Keep partial line in the buffer
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          if (trimmed.startsWith("data: ")) {
+            try {
+              const jsonStr = trimmed.slice(6);
+              const data = JSON.parse(jsonStr);
+              if (data.type === 'token') {
+                accumulatedText += data.content;
+                setDraftRuling(accumulatedText);
+                setEditedRulingText(accumulatedText);
+              } else if (data.type === 'thinking') {
+                setThinkingLogs(prev => [...prev, data.content]);
+              } else if (data.type === 'metadata') {
+                setCitedPrecedentIds(data.cited_precedent_ids || []);
+                setCitedPrecedents(data.cited_precedents || []);
+                setTelemetryAnalysis(data.telemetry_analysis || null);
+                setBackendResponse({
+                  incident_details: payload,
+                  regulatory_framework: data.regulatory_framework || {
+                    governing_body: seriesId === 'F1' ? 'FIA' : seriesId === 'MotoGP' ? 'FIM' : 'FIA / ACO',
+                    allowable_penalties: []
+                  },
+                  applicable_clauses: data.applicable_clauses,
+                  steward_draft_ruling: data.steward_draft_ruling,
+                  status: "Awaiting Human-in-the-Loop Confirmation"
+                });
+
+                const parsedPenalties = normalizePenalties(data.regulatory_framework?.allowable_penalties);
+                const parsedPenalty = parseProposedAdjudication(data.steward_draft_ruling, parsedPenalties);
+                
+                let selectedPen = parsedPenalties[0] || '5S TIME PENALTY';
+                if (parsedPenalty) {
+                  selectedPen = parsedPenalty;
+                }
+                setChosenAdjudication(selectedPen);
+                syncPenaltyStateFromChosen(selectedPen);
+              }
+            } catch (err) {
+              console.error("Failed to parse SSE line:", trimmed, err);
+            }
+          }
+        }
       }
-      setChosenAdjudication(selectedPen);
-      syncPenaltyStateFromChosen(selectedPen);
     } catch (err) {
       console.error(err);
       setError(err.message || 'Network connection failed.');
@@ -490,11 +600,10 @@ function App() {
   const governingBody = backendResponse?.regulatory_framework?.governing_body || activeTemplate.governing_body;
   const governingLogo = activeTemplate.governing_logo;
   const standbyRules = allRegulations.filter(r => r.series_id.toUpperCase() === seriesId.toUpperCase());
-  const draftRuling = backendResponse?.steward_draft_ruling;
 
   const activeRulingText = useMemo(() => {
-    return isEditing ? editedRulingText : (backendResponse?.steward_draft_ruling || '');
-  }, [isEditing, editedRulingText, backendResponse?.steward_draft_ruling]);
+    return isEditing ? editedRulingText : (draftRuling || '');
+  }, [isEditing, editedRulingText, draftRuling]);
 
   const rawRuleIds = useMemo(() => {
     return extractRuleIdsFromText(activeRulingText);
@@ -502,7 +611,7 @@ function App() {
 
   const applicableClauses = useMemo(() => {
     // If analysis hasn't run yet, show the standby rules (all regulations for this series)
-    if (!backendResponse) {
+    if (!backendResponse && !draftRuling) {
       return standbyRules;
     }
 
@@ -541,7 +650,7 @@ function App() {
 
   const handleApproveAdjudication = async () => {
     if (!backendResponse) return;
-    setIsLoading(true);
+    setIsSaving(true);
     setSystemAlert(null);
     setError(null);
 
@@ -587,7 +696,7 @@ function App() {
       });
       setTimeout(() => setSystemAlert(null), 5000);
     } finally {
-      setIsLoading(false);
+      setIsSaving(false);
     }
   };
 
@@ -716,10 +825,10 @@ function App() {
         
         {/* VIEW 1: STEWARD DASHBOARD */}
         {activeView === 'dashboard' && (
-          <main className="flex-1 flex p-gutter gap-gutter bg-background overflow-hidden w-full">
+          <main className="flex-1 flex p-gutter bg-background overflow-hidden w-full relative">
             
-            {/* COLUMN 1: INCIDENT CAPTURE (25% width) */}
-            <section className="w-1/4 min-w-[280px] max-w-[340px] flex flex-col gap-gutter overflow-hidden">
+            {/* COLUMN 1: INCIDENT CAPTURE (Resizable width) */}
+            <section className="flex-shrink-0 flex flex-col gap-gutter overflow-hidden" style={{ width: col1Width }}>
               <div className="bg-surface-container border border-outline-variant flex flex-col h-full">
                 <div className="bg-surface-container-low p-sm flex items-center justify-between border-b border-outline-variant">
                   <span className="font-label-caps text-[11px] font-bold text-on-surface-variant tracking-widest">INCIDENT CAPTURE</span>
@@ -876,8 +985,17 @@ function App() {
               </div>
             </section>
 
-            {/* COLUMN 2: REGULATORY CORE (35% width) */}
-            <section className="w-[35%] flex flex-col gap-gutter overflow-hidden">
+            {/* COLUMN 1-2 RESIZER */}
+            <div 
+              onMouseDown={startResizingCol1} 
+              className="w-[8px] self-stretch cursor-col-resize flex items-center justify-center hover:bg-primary-container/20 group transition-all select-none flex-shrink-0"
+              title="Drag to resize columns"
+            >
+              <div className="w-[1.5px] h-16 bg-outline-variant/40 group-hover:bg-primary-container group-active:bg-primary-container rounded transition-colors duration-200" />
+            </div>
+
+            {/* COLUMN 2: REGULATORY CORE (Resizable width) */}
+            <section className="flex-shrink-0 flex flex-col gap-gutter overflow-hidden" style={{ width: col2Width }}>
               <div className="bg-surface-container border border-outline-variant flex flex-col h-full overflow-hidden">
                 <div className="bg-surface-container-low p-sm flex items-center justify-between border-b border-outline-variant">
                   <span className="font-label-caps text-[11px] font-bold text-on-surface-variant tracking-widest">REGULATORY CORE</span>
@@ -984,8 +1102,17 @@ function App() {
               </div>
             </section>
 
-            {/* COLUMN 3: JUDICIAL CO-PILOT (40% width) */}
-            <section className="w-[40%] flex flex-col gap-gutter overflow-hidden">
+            {/* COLUMN 2-3 RESIZER */}
+            <div 
+              onMouseDown={startResizingCol2} 
+              className="w-[8px] self-stretch cursor-col-resize flex items-center justify-center hover:bg-primary-container/20 group transition-all select-none flex-shrink-0"
+              title="Drag to resize columns"
+            >
+              <div className="w-[1.5px] h-16 bg-outline-variant/40 group-hover:bg-primary-container group-active:bg-primary-container rounded transition-colors duration-200" />
+            </div>
+
+            {/* COLUMN 3: JUDICIAL CO-PILOT (Flexible width) */}
+            <section className="flex-1 min-w-[380px] flex flex-col gap-gutter overflow-hidden">
               <div className="bg-surface-container-lowest border border-outline-variant flex flex-col h-full overflow-hidden">
                 
                 <div className="bg-surface-container-low p-sm flex items-center justify-between border-b border-outline-variant">
@@ -1045,67 +1172,160 @@ function App() {
                       </div>
                     </div>
                   )}
-
                   {isEditing ? (
                     <textarea
                       value={editedRulingText}
                       onChange={(e) => setEditedRulingText(e.target.value)}
                       className="flex-1 w-full h-full p-md bg-black border-none focus:outline-none focus:ring-0 text-primary-container font-mono text-xs leading-relaxed resize-none overflow-y-auto scrolling-terminal"
                     />
-                  ) : isLoading ? (
-                    <div className="flex-1 p-md overflow-y-auto scrolling-terminal font-data-md text-xs text-primary-container leading-relaxed">
-                      <div className="flex flex-col gap-sm font-mono text-[10px]">
-                        <span className="text-secondary-container font-semibold">// INGESTING INCIDENT TELEMETRY SNAPSHOT...</span>
-                        <span className="text-on-surface-variant">// CORRELATING REGULATIONS UNDER {governingBody}...</span>
-                        <span className="text-on-surface-variant">// RUNNING MULTI-AGENT COORDINATION MESH...</span>
-                        <span className="text-on-surface-variant">// RESOLVING PRECEDENTS & GRADED PENALTY WINDOW...</span>
-                        <span className="text-on-surface-variant">// COMPILING FINAL ADJUDICATION DRAFT...</span>
-                        
-                        <div className="flex justify-center mt-lg">
-                          <pre className="animate-spin text-secondary-container font-mono text-[14px] select-none leading-none inline-block origin-center">
-{`     .---.     
-   /   |   \\   
-  | -- O -- |  
-   \\   |   /   
-     '---'     `}
-                          </pre>
-                        </div>
-                      </div>
-                    </div>
-                  ) : draftRuling ? (
-                    <div className="flex-1 p-md overflow-y-auto scrolling-terminal font-data-md text-xs text-primary-container leading-relaxed animate-fadeIn">
-                      <div className="mb-md border-b border-outline-variant/30 pb-xs">
-                        <span className="text-secondary-container font-semibold">[ANALYSIS_REPORT_UUID: RC-{seriesId}-2026]</span><br />
-                        <span className="text-on-surface-variant">// INPUT: Incident captured at T{turnNumber} {trackLayout}</span><br />
-                        <span className="text-on-surface-variant">// CORRELATION COMPLETE: {applicableClauses.length} Regulation matches found.</span>
+                  ) : (
+                    <div className="flex-1 p-md overflow-y-auto scrolling-terminal font-data-md text-xs text-primary-container leading-relaxed flex flex-col justify-between relative">
+                      {draftRuling && (
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(draftRuling);
+                            setCopied(true);
+                            setTimeout(() => setCopied(false), 2000);
+                          }}
+                          className="absolute top-3 right-3 bg-surface-container-high/80 hover:bg-surface-container-highest border border-outline-variant/60 hover:border-primary-container text-on-surface-variant hover:text-primary-container px-sm py-xs font-display-mono text-[10px] rounded-sm transition-all duration-200 pointer-events-auto shadow-[0_0_8px_rgba(0,0,0,0.5)] flex items-center gap-xs z-10"
+                        >
+                          <span className="material-symbols-outlined text-[12px]">{copied ? 'check' : 'content_copy'}</span>
+                          <span>{copied ? '[✓ Copied!]' : '[⎘ Copy Report]'}</span>
+                        </button>
+                      )}
+                      <div className="flex-1 flex flex-col justify-start">
+                        {/* 1. Standby (No Loading, No Draft) */}
+                        {!isLoading && !draftRuling && (
+                          <div className="flex-1 flex flex-col gap-sm opacity-50 justify-center items-center text-center px-lg py-xl">
+                            <span className="material-symbols-outlined text-[36px] text-on-surface-variant/30">terminal</span>
+                            <div className="font-semibold text-on-surface-variant uppercase tracking-wider text-[11px]">[SYSTEM STATUS: STANDBY]</div>
+                            <div className="text-[11px] text-on-surface-variant max-w-[280px]">
+                              Awaiting marshal input. Populate Column 1 and trigger "RUN CO-PILOT ANALYSIS" to generate a regulatory assessment.
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 2. Thinking logs (Loading, no Draft yet) */}
+                        {isLoading && !draftRuling && (
+                          <div className="flex flex-col gap-sm font-mono text-[10px]">
+                            {thinkingLogs.map((log, idx) => (
+                              <span
+                                key={idx}
+                                className={idx === thinkingLogs.length - 1 ? "text-secondary-container font-semibold animate-pulse" : "text-on-surface-variant/80"}
+                              >
+                                // {log.toUpperCase()}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* 3. Draft ruling text (Draft exists) */}
+                        {draftRuling && (
+                          <div className="text-on-surface text-[13px] leading-relaxed animate-fadeIn">
+                            <div className="mb-md border-b border-outline-variant/30 pb-xs font-mono text-xs">
+                              <span className="text-secondary-container font-semibold">[ANALYSIS_REPORT_UUID: RC-{seriesId}-2026]</span><br />
+                              <span className="text-on-surface-variant">// INPUT: Incident captured at T{turnNumber} {trackLayout}</span><br />
+                              <span className="text-on-surface-variant">// CORRELATION COMPLETE: {applicableClauses.length} Regulation matches found.</span>
+                            </div>
+
+                            <div className="text-on-surface text-[13px] leading-relaxed">
+                              <ReactMarkdown
+                                components={{
+                                  h1: ({node, ...props}) => <h1 className="font-display-mono text-base text-primary-container uppercase mt-sm mb-xs" {...props} />,
+                                  h2: ({node, ...props}) => <h2 className="font-display-mono text-sm text-primary-container uppercase mt-sm mb-xs" {...props} />,
+                                  h3: ({node, ...props}) => <h3 className="font-display-mono text-xs text-primary-container uppercase mt-sm mb-xs font-bold" {...props} />,
+                                  p: ({node, ...props}) => <p className="text-[13px] font-sans text-on-surface leading-relaxed mb-sm" {...props} />,
+                                  ul: ({node, ...props}) => <ul className="list-disc pl-md text-xs text-on-surface-variant flex flex-col gap-xs mb-sm" {...props} />,
+                                  ol: ({node, ...props}) => <ol className="list-decimal pl-md text-xs text-on-surface-variant flex flex-col gap-xs mb-sm" {...props} />,
+                                  li: ({node, ...props}) => <li className="text-[12px] font-sans leading-relaxed" {...props} />,
+                                  code: ({node, inline, ...props}) => <code className="bg-surface-dim px-sm py-micro font-mono text-[11px] text-secondary-container border border-outline-variant/50" {...props} />
+                                }}
+                              >
+                                {draftRuling}
+                              </ReactMarkdown>
+                            </div>
+                          </div>
+                        )}
                       </div>
 
-                      <div className="text-on-surface text-[13px] leading-relaxed">
-                        <ReactMarkdown
-                          components={{
-                            h1: ({node, ...props}) => <h1 className="font-display-mono text-base text-primary-container uppercase mt-sm mb-xs" {...props} />,
-                            h2: ({node, ...props}) => <h2 className="font-display-mono text-sm text-primary-container uppercase mt-sm mb-xs" {...props} />,
-                            h3: ({node, ...props}) => <h3 className="font-display-mono text-xs text-primary-container uppercase mt-sm mb-xs font-bold" {...props} />,
-                            p: ({node, ...props}) => <p className="text-[13px] font-sans text-on-surface leading-relaxed mb-sm" {...props} />,
-                            ul: ({node, ...props}) => <ul className="list-disc pl-md text-xs text-on-surface-variant flex flex-col gap-xs mb-sm" {...props} />,
-                            ol: ({node, ...props}) => <ol className="list-decimal pl-md text-xs text-on-surface-variant flex flex-col gap-xs mb-sm" {...props} />,
-                            li: ({node, ...props}) => <li className="text-[12px] font-sans leading-relaxed" {...props} />,
-                            code: ({node, inline, ...props}) => <code className="bg-surface-dim px-sm py-micro font-mono text-[11px] text-secondary-container border border-outline-variant/50" {...props} />
-                          }}
-                        >
-                          {draftRuling}
-                        </ReactMarkdown>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex-1 p-md overflow-y-auto scrolling-terminal font-data-md text-xs text-primary-container leading-relaxed flex flex-col gap-sm opacity-50 h-full justify-center items-center text-center px-lg">
-                      <span className="material-symbols-outlined text-[36px] text-on-surface-variant/30">terminal</span>
-                      <div className="font-semibold text-on-surface-variant uppercase tracking-wider text-[11px]">[SYSTEM STATUS: STANDBY]</div>
-                      <div className="text-[11px] text-on-surface-variant max-w-[280px]">
-                        Awaiting marshal input. Populate Column 1 and trigger "RUN CO-PILOT ANALYSIS" to generate a regulatory assessment.
-                      </div>
+                      {/* 4. Active stream ASCII racing wheel spinning at the bottom */}
+                      {isLoading && (
+                        <div className="flex justify-center mt-lg py-sm border-t border-outline-variant/20 flex-none animate-fadeIn">
+                          <pre 
+                            className="animate-spin text-secondary-container font-mono text-[9px] select-none leading-none inline-block origin-center whitespace-pre"
+                            style={{ animationDuration: '4s' }}
+                          >
+{`               Y[]>!!l>_-0              
+           f<<I"[:;IIlI;]^Ii<t          
+         -<;:x1Yr)     (nY{l:l<_        
+       {~^?{z    _(   {-    c{~\`<[      
+     X<ilfX}x     >\\ j<      _ jl>lu    
+    v>!>c  {{     <+!<-     [{  v>l>Y   
+   b|;+z    1?x    !>!    h{\\    c>l{w  
+   +ilz{_-+)c~})  -~i>\\  j]?ct?<+/cl>_  
+   <<ic   !<<<<)+__!!i->~?~><i!   c!~  
+  }+;?        ;<<l~<~!?l~-I        {i+[ 
+  ~]{X         !!i]+~<<>><Q        X\\\\?? 
+  ~-"fl_]]_[rl-+i!l)jr>~<_(l|}]1__Iv:+- 
+  ++<-v    \\_)(t/iI",:I;ij{/_t     n[~- 
+   ->+u   ?It   lj+~I~+n;    i{J  c?i_  
+   _([/u]<      +uf,IIrJi      :??rtt~  
+    _){/n      <]}<   >}[]      c)<[}   
+     1\\<<v   }<{$}     ]fx++   Yj)x?    
+      -}l-zn{?   _     >x  <_uC)~{~     
+       >}({:1cvp ~     <| zX|:_/(<      
+         x+?]!-~[~YYYUU+\\+{~]{?x        
+            ><}_}!~~i<_i}_{>!`}
+                          </pre>
+                        </div>
+                      )}
                     </div>
                   )}
+                </div>
+
+                {/* Applied Historical Precedents Container */}
+                <div 
+                  className={`bg-surface-container-low border-t border-outline-variant flex flex-col transition-all duration-500 ease-in-out overflow-hidden flex-none ${
+                    !isLoading && citedPrecedentIds && citedPrecedentIds.length > 0 ? 'h-[35%] min-h-[180px]' : 'h-0 border-t-0'
+                  }`}
+                >
+                  <div className="p-sm bg-surface-container-high border-b border-outline-variant flex items-center justify-between flex-none">
+                    <span className="font-label-caps text-[10px] font-bold text-primary-container tracking-wider">APPLIED HISTORICAL PRECEDENTS</span>
+                    <span className="text-[10px] text-on-surface-variant font-mono">{citedPrecedentIds.length} Case(s) Matched</span>
+                  </div>
+                  
+                  <div className="flex-1 overflow-y-auto p-sm flex flex-col gap-sm">
+                    {citedPrecedentIds.map(id => {
+                      const precedent = citedPrecedents.find(p => p.id === id);
+                      if (!precedent) return null;
+                      
+                      let badgeColor = "border-primary-container text-primary-container bg-primary-container/10";
+                      if (precedent.incident_category === "F1") badgeColor = "border-red-500 text-red-500 bg-red-500/10";
+                      else if (precedent.incident_category === "WEC") badgeColor = "border-blue-500 text-blue-500 bg-blue-500/10";
+                      else if (precedent.incident_category === "MOTOGP") badgeColor = "border-amber-500 text-amber-500 bg-amber-500/10";
+
+                      return (
+                        <div 
+                          key={id}
+                          onClick={() => setSelectedPrecedentForModal(precedent)}
+                          className="bg-black border border-outline-variant hover:border-primary-container p-sm flex flex-col gap-xs cursor-pointer transition-all duration-200 group"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className={`text-[9px] font-bold px-xs py-micro border rounded ${badgeColor} font-mono uppercase`}>
+                              {precedent.incident_category}
+                            </span>
+                            <span className="text-[9px] text-on-surface-variant font-mono">{precedent.sporting_rule_cited}</span>
+                          </div>
+                          <p className="text-xs text-on-surface line-clamp-2 leading-relaxed">
+                            {precedent.summary}
+                          </p>
+                          <div className="text-[10px] text-secondary-container group-hover:text-primary-container font-mono transition-colors flex items-center gap-xs mt-micro">
+                            <span className="transform group-hover:translate-x-xs transition-transform inline-block">&gt;</span> Click to Compare Live Telemetry Variance
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {/* Footer Adjudication Control Tray */}
@@ -1147,6 +1367,7 @@ function App() {
                       <>
                         <button 
                           onClick={() => setIsEditing(false)}
+                          disabled={isSaving}
                           className="flex-1 bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/50 font-label-caps text-xs font-bold py-md hover:opacity-90 active:scale-95 transition-all flex items-center justify-center gap-sm"
                         >
                           <span className="material-symbols-outlined text-base">cancel</span>
@@ -1154,22 +1375,22 @@ function App() {
                         </button>
                         <button 
                           onClick={handleApproveAdjudication}
-                          disabled={isLoading}
+                          disabled={isLoading || isSaving}
                           className="flex-1 bg-primary-container text-on-primary font-label-caps text-xs font-bold py-md hover:opacity-90 active:scale-95 transition-all glow-hover flex items-center justify-center gap-sm"
                         >
-                          <span className="material-symbols-outlined text-base">check_circle</span>
-                          CONFIRM & ARCHIVE
+                          <span className="material-symbols-outlined text-base">{isSaving ? 'hourglass_empty' : 'check_circle'}</span>
+                          {isSaving ? 'SAVING...' : 'CONFIRM & ARCHIVE'}
                         </button>
                       </>
                     ) : (
                       <>
                         <button 
                           onClick={handleApproveAdjudication}
-                          disabled={!backendResponse || isLoading}
-                          className={`flex-1 bg-primary-container text-on-primary font-label-caps text-xs font-bold py-md hover:opacity-90 active:scale-95 transition-all glow-hover flex items-center justify-center gap-sm ${!backendResponse ? 'opacity-30 cursor-not-allowed border border-outline-variant/35 bg-transparent text-on-surface-variant' : ''}`}
+                          disabled={!backendResponse || isLoading || isSaving}
+                          className={`flex-1 bg-primary-container text-on-primary font-label-caps text-xs font-bold py-md hover:opacity-90 active:scale-95 transition-all glow-hover flex items-center justify-center gap-sm ${!backendResponse || isSaving ? 'opacity-30 cursor-not-allowed border border-outline-variant/35 bg-transparent text-on-surface-variant' : ''}`}
                         >
-                          <span className="material-symbols-outlined text-base">check_circle</span>
-                          APPROVE ADJUDICATION
+                          <span className="material-symbols-outlined text-base">{isSaving ? 'hourglass_empty' : 'check_circle'}</span>
+                          {isSaving ? 'SAVING...' : 'APPROVE ADJUDICATION'}
                         </button>
                         <button 
                           onClick={() => {
@@ -1177,8 +1398,8 @@ function App() {
                             setIsEditing(true);
                             setEditedRulingText(backendResponse.steward_draft_ruling || '');
                           }}
-                          disabled={!backendResponse || isLoading}
-                          className={`flex-1 border font-label-caps text-xs font-bold py-md hover:bg-surface-container-highest active:scale-95 transition-all flex items-center justify-center gap-sm ${!backendResponse ? 'opacity-30 cursor-not-allowed border border-outline-variant/35 text-on-surface-variant' : 'border-outline text-on-surface-variant'}`}
+                          disabled={!backendResponse || isLoading || isSaving}
+                          className={`flex-1 border font-label-caps text-xs font-bold py-md hover:bg-surface-container-highest active:scale-95 transition-all flex items-center justify-center gap-sm ${!backendResponse || isSaving ? 'opacity-30 cursor-not-allowed border border-outline-variant/35 text-on-surface-variant' : 'border-outline text-on-surface-variant'}`}
                         >
                           <span className="material-symbols-outlined text-base">edit</span>
                           AMEND DRAFT RULING
@@ -1212,6 +1433,101 @@ function App() {
         )}
 
       </div>
+
+      {/* Side-by-Side Telemetry Comparison Modal */}
+      {selectedPrecedentForModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-surface-container-lowest border border-outline-variant w-[550px] flex flex-col shadow-2xl animate-scaleUp">
+            
+            <div className="p-md bg-surface-container-low border-b border-outline-variant flex items-center justify-between">
+              <div className="flex flex-col gap-micro">
+                <span className="font-label-caps text-xs font-bold text-primary-container tracking-wider">TELEMETRY COMPARISON MATRIX</span>
+                <span className="text-[10px] text-on-surface-variant font-mono">Comparing Live Incident vs. Precedent Case</span>
+              </div>
+              <button 
+                onClick={() => setSelectedPrecedentForModal(null)}
+                className="text-on-surface-variant hover:text-on-surface transition-colors w-8 h-8 flex items-center justify-center border border-outline-variant hover:border-on-surface"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+            
+            <div className="p-md flex flex-col gap-lg overflow-y-auto max-h-[70vh]">
+              
+              <div className="flex flex-col gap-xs bg-black p-sm border border-outline-variant">
+                <span className="text-[10px] text-secondary-container font-mono uppercase tracking-wider">// HISTORICAL PRECEDENT CASE SUMMARY</span>
+                <p className="text-xs text-on-surface leading-relaxed">
+                  {selectedPrecedentForModal.summary}
+                </p>
+                <div className="flex items-center gap-md text-[10px] text-on-surface-variant font-mono mt-xs">
+                  <span>Category: {selectedPrecedentForModal.incident_category}</span>
+                  <span>Rule: {selectedPrecedentForModal.sporting_rule_cited}</span>
+                  <span>Verdict: {selectedPrecedentForModal.official_verdict}</span>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-xs">
+                <span className="text-[10px] text-secondary-container font-mono uppercase tracking-wider">// TELEMETRY VARIANCE ANALYSIS</span>
+                <div className="border border-outline-variant overflow-hidden">
+                  <table className="w-full text-left font-mono text-xs">
+                    <thead>
+                      <tr className="bg-surface-container-high border-b border-outline-variant text-[10px] text-on-surface-variant">
+                        <th className="p-sm font-semibold">METRIC</th>
+                        <th className="p-sm font-semibold">TRACK BASELINE</th>
+                        <th className="p-sm font-semibold">LIVE INCIDENT</th>
+                        <th className="p-sm font-semibold">VARIANCE (DELTA)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-outline-variant/30">
+                      <tr>
+                        <td className="p-sm font-sans text-on-surface font-semibold">Braking Point Mark</td>
+                        <td className="p-sm text-on-surface-variant">
+                          {telemetryAnalysis ? `${telemetryAnalysis.baseline_brake_point}m` : '150.0m'}
+                        </td>
+                        <td className="p-sm text-primary-container">
+                          {telemetryAnalysis ? `${telemetryAnalysis.active_incident_brake_point}m` : '125.0m'}
+                        </td>
+                        <td className={`p-sm font-bold ${
+                          telemetryAnalysis?.braking_delta < 0 ? 'text-red-500' : 'text-green-500'
+                        }`}>
+                          {telemetryAnalysis ? `${telemetryAnalysis.braking_delta >= 0 ? '+' : ''}${telemetryAnalysis.braking_delta.toFixed(2)}m` : '-25.00m'}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="p-sm font-sans text-on-surface font-semibold">Apex Speed</td>
+                        <td className="p-sm text-on-surface-variant">
+                          {telemetryAnalysis ? `${telemetryAnalysis.baseline_apex_speed} km/h` : '90.0 km/h'}
+                        </td>
+                        <td className="p-sm text-primary-container">
+                          {telemetryAnalysis ? `${telemetryAnalysis.active_incident_apex_speed} km/h` : '105.0 km/h'}
+                        </td>
+                        <td className={`p-sm font-bold ${
+                          telemetryAnalysis?.speed_delta > 0 ? 'text-red-500' : 'text-green-500'
+                        }`}>
+                          {telemetryAnalysis ? `${telemetryAnalysis.speed_delta >= 0 ? '+' : ''}${telemetryAnalysis.speed_delta.toFixed(2)} km/h` : '+15.00 km/h'}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="text-[11px] text-on-surface-variant/80 leading-relaxed font-sans border-l-2 border-primary-container pl-sm">
+                <strong>Stewards' Note:</strong> A negative braking delta indicates a later braking point relative to the track baseline (deep corner entry). A positive speed delta indicates excessive apex speed, typical of carrying too much momentum into the corner apex, which correlates with an increased likelihood of avoidable contact.
+              </div>
+            </div>
+
+            <div className="p-md bg-surface-container-low border-t border-outline-variant flex justify-end">
+              <button 
+                onClick={() => setSelectedPrecedentForModal(null)}
+                className="btn-secondary text-xs uppercase"
+              >
+                Close Comparison
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Atmospheric Radial Grid Background */}
       <div className="fixed inset-0 pointer-events-none z-[-1] opacity-5 overflow-hidden">

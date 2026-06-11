@@ -5,7 +5,7 @@ class Settings(BaseSettings):
 	# Pydantic-settings will scan the .env for these keys
 	MONGO_URI: str
 	MONGO_DB_NAME: str
-	GEMINI_API_KEY: str
+	GEMINI_API_KEY: Optional[str] = None
 
 	JWT_SECRET: str
 	PASSWORD_SALT: str
