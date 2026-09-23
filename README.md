@@ -107,14 +107,29 @@ PYTHONPATH=. pytest backend/tests
 * **Live Frontend**: [race-control-engine-2026.web.app](https://race-control-engine-2026.web.app)
 * **Live Backend**: [race-control-engine-478055061591.us-central1.run.app](https://race-control-engine-478055061591.us-central1.run.app)
 
-### Deploying Backend to Google Cloud Run
-```bash
-gcloud run deploy race-control-engine --source . --region us-central1
-```
-
-### Deploying Frontend to Firebase Hosting
-```bash
-cd frontend
-npm run build
-firebase deploy --only hosting
-```
+### Redeployment From Scratch Checklist
+1. **Database Setup**:
+   - Provision a MongoDB Atlas cluster (`RaceControl_Core`).
+   - The application will automatically seed baseline sporting codes, circuit directories, telemetry baselines, and historical precedents upon the first startup.
+2. **Backend Deployment (Google Cloud Run)**:
+   - Copy `.env.example` to `.env` in the root folder and configure your MongoDB connection string and GCP Project ID.
+   - Deploy directly from source:
+     ```bash
+     gcloud run deploy race-control-engine --source . --region us-central1
+     ```
+   - Note the resulting Cloud Run Service URL (e.g. `https://race-control-engine-xxxx.us-central1.run.app`).
+3. **Frontend Deployment (Firebase Hosting)**:
+   - Copy `frontend/.env.example` to `frontend/.env.production` and set `VITE_API_URL` to your Cloud Run Service URL.
+   - Build and deploy:
+     ```bash
+     cd frontend
+     npm install
+     npm run build
+     firebase deploy --only hosting
+     ```
+4. **Access & Verification**:
+   - Open your Firebase hosting URL.
+   - Sign in using the default administrative credentials:
+     * **Username**: `chief_steward`
+     * **Password**: `racecontrol2026`
+   - Run an incident inquiry to verify that the telemetry delta calculations and reasoning pipeline stream properly.
