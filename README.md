@@ -9,10 +9,10 @@ The system combines a non-blocking FastAPI backend, a React/Tailwind visual cock
 ## Key System Architecture
 
 ### 1. Agentic Adjudication Loop & Real-Time Event Streaming
-* **Server-Sent Events (SSE) Streaming**: Supports real-time streaming of both the agent's internal thinking logs (MCP tool executions, keyword searches, precedent lookups) and raw Markdown ruling tokens sequentially.
+* **Server-Sent Events (SSE) Streaming**: Supports real-time streaming of both the agent's internal thinking logs (Atlas database tool executions, keyword searches, precedent lookups) and raw Markdown ruling tokens sequentially.
 * **RAG Precedents & Series Isolation**: Queries, scores, and injects relevant historical incident precedents from the database. Prevents cross-contamination by strictly isolating lookups to the governing series' boundaries (F1, MotoGP, WEC).
 * **Mathematical Telemetry Delta Calculator**: Computes physical variances (deltas) between baseline track telemetry (braking points, apex speeds) and incident telemetry in real-time, injecting delta calculations into the LLM system prompt.
-* **Custom MCP Session Interceptor**: Integrates custom tool intercepts to capture exact sporting article IDs and extract matching regulatory clauses.
+* **Custom Regulation & Precedent Interceptor**: Integrates custom tool intercepts to capture exact sporting article IDs and extract matching regulatory clauses directly from MongoDB Atlas.
 * **Dynamic Scoping Boundaries**: Restricts the model's search spaces to on-track behavior, track limits, and driving standards, preventing paddock logistics or clothing regulations from polluting the UI.
 
 ### 2. Full-Page Control Plane (Settings)
@@ -31,9 +31,9 @@ The system combines a non-blocking FastAPI backend, a React/Tailwind visual cock
 ---
 
 ## Tech Stack
-* **Backend**: Python 3.11+, FastAPI, MongoDB Atlas (via `motor` async driver), PyJWT, Google GenAI SDK.
+* **Backend**: Python 3.11+, FastAPI, MongoDB Atlas (via `motor` async driver), PyJWT, Google GenAI SDK / Vertex AI.
 * **Frontend**: React, Vite, TailwindCSS, Material Symbols.
-* **Interprocess Protocol**: Model Context Protocol (MCP stdio).
+* **Protocol Bridges**: Server-Sent Events (SSE), Model Context Protocol (MCP JSON-RPC).
 
 ---
 
@@ -49,7 +49,7 @@ GCP_REGION=us-central1
 # Optional configuration (defaults are provided but should be overridden in production)
 JWT_SECRET=your_secure_jwt_secret_here
 PASSWORD_SALT=your_secure_password_salt_here
-CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+CORS_ORIGINS=http://localhost:5173,http://localhost:3000,https://race-control-engine-2026.web.app,https://race-control-engine-2026.firebaseapp.com
 ```
 
 ### Backend Setup
@@ -98,4 +98,23 @@ python3 validate_sprint.py
 To run backend unit tests:
 ```bash
 PYTHONPATH=. pytest backend/tests
+```
+
+---
+
+## Production Deployment & Live Endpoints
+
+* **Live Frontend**: [race-control-engine-2026.web.app](https://race-control-engine-2026.web.app)
+* **Live Backend**: [race-control-engine-478055061591.us-central1.run.app](https://race-control-engine-478055061591.us-central1.run.app)
+
+### Deploying Backend to Google Cloud Run
+```bash
+gcloud run deploy race-control-engine --source . --region us-central1
+```
+
+### Deploying Frontend to Firebase Hosting
+```bash
+cd frontend
+npm run build
+firebase deploy --only hosting
 ```
