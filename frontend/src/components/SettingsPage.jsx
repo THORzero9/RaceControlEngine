@@ -565,7 +565,7 @@ function SettingsPage() {
                       </div>
                       <div className="flex flex-col gap-sm">
                         <div>
-                          <span className="font-bold text-sm text-on-surface">Local MCP Server</span>
+                          <span className="font-bold text-sm text-on-surface">MongoDB Partner MCP Server</span>
                           <span className="text-[10px] text-on-surface-variant font-mono block mt-micro">
                             {mcpDetails.transport}
                           </span>

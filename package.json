@@ -1,0 +1,15 @@
+{
+  "name": "race-control-engine-root",
+  "version": "1.0.0",
+  "description": "Root package config for Google Cloud Buildpacks auto-detection",
+  "main": "index.js",
+  "scripts": {
+    "build": "echo 'No frontend compilation needed at Node root layer'"
+  },
+  "dependencies": {
+    "mongodb-mcp-server": "latest"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

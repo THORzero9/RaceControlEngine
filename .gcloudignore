@@ -1,0 +1,26 @@
+.gcloudignore
+.git
+.gitignore
+
+# Virtual Environments
+v_env/
+.venv/
+env/
+ENV/
+
+# Node Dependencies & Builds
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+
+# Python Cache & Testing
+__pycache__/
+.pytest_cache/
+.agents/
+scratch/
+
+# Local logs
+*.log
+stderr.log
+stdout.log

@@ -28,7 +28,9 @@ htmlcov/
 
 # Local Agent Workspace
 .agents/
+.antigravitycli/
 scratch/
+*.log
 
 # OS Files
 .DS_Store

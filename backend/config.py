@@ -11,11 +11,17 @@ class Settings(BaseSettings):
 	PASSWORD_SALT: str
 	JWT_ALGORITHM: str = "HS256"
 
-	CORS_ORIGINS: Union[str, List[str]] = ["http://localhost:5173", "http://localhost:3000"]
+	CORS_ORIGINS: Union[str, List[str]] = [
+		"http://localhost:5173",
+		"http://localhost:3000",
+		"https://race-control-engine-2026.web.app",
+		"https://race-control-engine-2026.firebaseapp.com",
+	]
 
 	GCP_PROJECT_ID: Optional[str] = None
 	GCP_LOCATION: Optional[str] = "us-central1"
 	GCP_AGENT_ID: Optional[str] = None
+	GCP_REASONING_ENGINE_ID: Optional[str] = None
 	GCP_AUDIENCE: Optional[str] = None
 
 	# This configuration maps Pydantic directly to our root directory environment

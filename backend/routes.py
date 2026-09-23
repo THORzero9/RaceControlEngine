@@ -1,15 +1,37 @@
+import sys
+from unittest.mock import MagicMock
+
+# Inject a preemptive mock structure into sys.modules to satisfy the deep google.adk internal imports
+if 'mcp' not in sys.modules:
+    try:
+        import mcp
+    except ImportError:
+        mock_mcp = MagicMock()
+        mock_mcp.ClientSession = MagicMock
+        mock_mcp.StdioServerParameters = MagicMock
+        
+        mock_stdio = MagicMock()
+        mock_stdio.stdio_client = MagicMock
+        
+        sys.modules['mcp'] = mock_mcp
+        sys.modules['mcp.client'] = MagicMock()
+        sys.modules['mcp.client.stdio'] = mock_stdio
+
 import os
 import re
 import json
 import asyncio
+import logging
 import io
+
+logger = logging.getLogger(__name__)
 import jwt
 import hashlib
 import httpx
 import google.auth
 import google.auth.transport.requests
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, status, File, UploadFile, Form, Header
+from fastapi import APIRouter, HTTPException, status, File, UploadFile, Form, Header, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
@@ -19,6 +41,7 @@ from google.genai import types
 from backend.config import settings
 from backend.database import db_manager
 from backend.ingest_pdf import parse_pdf_text, sync_rules_to_db, extract_pdf_text_with_filters
+
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
@@ -40,8 +63,27 @@ class SpyingMcpSession(ClientSession):
         if result and result.content:
             for block in result.content:
                 if hasattr(block, 'text') and block.text:
+                    # Look for rule IDs like [FIA_APP_L_CH4_ART2B]
                     found_ids = re.findall(r'\[([A-Z0-9_.-]+)\]', block.text)
                     self.matched_rule_ids.update(found_ids)
+                    
+                    # Intercept rule IDs directly from official find-documents tool response
+                    if (name == "find-documents" or name == "find") and arguments.get("collection") == "sporting_codes":
+                        try:
+                            # Try parsing as JSON first
+                            parsed = json.loads(block.text)
+                            if isinstance(parsed, list):
+                                for doc in parsed:
+                                    if isinstance(doc, dict) and "_id" in doc:
+                                        self.matched_rule_ids.add(str(doc["_id"]))
+                            elif isinstance(parsed, dict):
+                                if "_id" in parsed:
+                                    self.matched_rule_ids.add(str(parsed["_id"]))
+                        except Exception:
+                            # Fallback to regex finding of "_id": "ID" in JSON-like text
+                            id_matches = re.findall(r'"_id":\s*"([^"]+)"', block.text)
+                            self.matched_rule_ids.update(id_matches)
+                            
         if self.event_queue:
             await self.event_queue.put({
                 "type": "thinking",
@@ -49,19 +91,19 @@ class SpyingMcpSession(ClientSession):
             })
         return result
 
+
 router = APIRouter(prefix="/api/v1", tags=["Race Control Adjudication"])
 
 # Initialize the official GenAI client conditionally based on configuration
-if settings.GEMINI_API_KEY:
-    # Direct Developer API-key sandbox routing (for local development/testing)
-    ai_client = genai.Client(api_key=settings.GEMINI_API_KEY)
-else:
-    # Enterprise Vertex AI routing utilizing GCP Default Credentials (for production)
+# On GCP / Cloud Run, prioritize Enterprise Vertex AI routing utilizing default credentials
+if settings.GCP_PROJECT_ID or not settings.GEMINI_API_KEY:
     ai_client = genai.Client(
         vertexai=True,
-        project=os.getenv("GCP_PROJECT_ID", "race-control-engine-2026"),
+        project=settings.GCP_PROJECT_ID or os.getenv("GCP_PROJECT_ID", "race-control-engine-2026"),
         location=os.getenv("GCP_REGION", "us-central1")
     )
+else:
+    ai_client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
 PHRASING_ALIASES = {
     "contact": ["contact", "collision", "hit", "collide", "struck", "impact"],
@@ -86,9 +128,9 @@ class IncidentPayload(BaseModel):
     active_incident_apex_speed: Optional[float] = Field(None, description="Active apex speed in km/h")
 
 class FinalAdjudicationPayload(BaseModel):
-    incident_details: Dict = Field(..., description="Details of the incident payload")
-    regulatory_framework: Dict = Field(..., description="Governing body and allowed penalties details")
-    applicable_clauses: List[Dict] = Field(..., description="Matched regulation clauses list")
+    incident_details: Optional[Dict] = Field(default_factory=dict, description="Details of the incident payload")
+    regulatory_framework: Optional[Dict] = Field(default_factory=dict, description="Governing body and allowed penalties details")
+    applicable_clauses: Optional[List[Dict]] = Field(default_factory=list, description="Matched regulation clauses list")
     steward_draft_ruling: str = Field(..., description="Raw textual draft ruling from the copilot engine")
     final_status: str = Field(..., description="Status (APPROVED or AMENDED)")
     steward_notes: Optional[str] = Field(None, description="Optional notes written by human stewards")
@@ -302,62 +344,88 @@ async def analyze_track_incident(payload: IncidentPayload):
 
         async def run_generation():
             try:
-                # 4. Trigger the live reasoning loop via Gemini using Stdio MCP server Parameters
-                import sys
-                current_dir = os.path.dirname(os.path.abspath(__file__))
-                mcp_server_path = os.path.join(current_dir, "mcp_server.py")
-
-                env_copy = os.environ.copy()
-                env_copy.pop("PORT", None)
-
-                server_params = StdioServerParameters(
-                    command=sys.executable,
-                    args=[mcp_server_path],
-                    env=env_copy
-                )
-
+                # 4. Trigger the live reasoning loop via Gemini with native Motor async queries
+                matched_rule_ids = set()
                 matched_rules = []
+
+                # Dynamic find_documents tool backed by native Motor async MongoDB Atlas queries
+                async def find_documents(collection: str, filter_query: str, limit: int = 10) -> str:
+                    """
+                    Query documents from a collection in the MongoDB database 'RaceControl_Core'.
+                    
+                    Args:
+                        collection: The collection to query (either 'sporting_codes' or 'incident_precedents')
+                        filter_query: A JSON string containing the MongoDB filter query. E.g. '{"series_id": "WEC"}'
+                        limit: Maximum number of documents to return
+                    """
+                    try:
+                        if isinstance(filter_query, dict):
+                            query_filter = filter_query
+                        else:
+                            query_filter = json.loads(filter_query)
+                    except Exception:
+                        query_filter = {}
+
+                    await queue.put({
+                        "type": "thinking",
+                        "content": f"Querying {collection} via MongoDB Atlas: {json.dumps(query_filter)}"
+                    })
+
+                    try:
+                        cursor = db_manager.db[collection].find(query_filter).limit(limit)
+                        docs = await cursor.to_list(limit)
+
+                        for doc in docs:
+                            if collection == "sporting_codes" and "_id" in doc:
+                                matched_rule_ids.add(str(doc["_id"]))
+                            doc["_id"] = str(doc["_id"])
+
+                        await queue.put({
+                            "type": "thinking",
+                            "content": f"Found {len(docs)} matching records in {collection}."
+                        })
+                        return json.dumps(docs, indent=2)
+                    except Exception as err:
+                        return f"Database query error: {str(err)}"
+
+                config = types.GenerateContentConfig(
+                    tools=[find_documents],
+                    temperature=0.2
+                )
                 
-                async with stdio_client(server_params) as (read, write):
-                    async with SpyingMcpSession(read, write, event_queue=queue) as session:
-                        await session.initialize()
-                        
-                        config = types.GenerateContentConfig(
-                            tools=[session],
-                            temperature=0.2
-                        )
-                        
-                        await queue.put({
-                            "type": "thinking",
-                            "content": "Running multi-agent coordination mesh..."
-                        })
-                        
-                        # Stream content generation asynchronously
-                        response_stream = await ai_client.aio.models.generate_content_stream(
-                            model='gemini-2.5-flash',
-                            contents=steward_prompt,
-                            config=config
-                        )
-                        
-                        async for chunk in response_stream:
-                            if chunk.text:
-                                await queue.put({"type": "token", "content": chunk.text})
-                        
-                        await queue.put({
-                            "type": "thinking",
-                            "content": "Resolving regulations and compiling final draft..."
-                        })
-                        
-                        # Fetch full rule documents from MongoDB for precisely matched rule IDs
-                        if session.matched_rule_ids:
-                            for rule_id in session.matched_rule_ids:
-                                rule_doc = await db_manager.sporting_codes.find_one({"_id": rule_id})
-                                if rule_doc:
-                                    matched_rules.append({
-                                        "rule_id": rule_doc["_id"],
-                                        "title": rule_doc["title"],
-                                        "raw_text": rule_doc["raw_text"]
-                                    })
+                await queue.put({
+                    "type": "thinking",
+                    "content": "Running multi-agent coordination mesh..."
+                })
+                
+                # Stream content generation asynchronously
+                response_stream = await ai_client.aio.models.generate_content_stream(
+                    model='gemini-2.5-flash',
+                    contents=steward_prompt,
+                    config=config
+                )
+                
+                async for chunk in response_stream:
+                    if chunk.text:
+                        found_ids = re.findall(r'\[([A-Z0-9_.-]+)\]', chunk.text)
+                        matched_rule_ids.update(found_ids)
+                        await queue.put({"type": "token", "content": chunk.text})
+                
+                await queue.put({
+                    "type": "thinking",
+                    "content": "Resolving regulations and compiling final draft..."
+                })
+                
+                # Fetch full rule documents from MongoDB for precisely matched rule IDs
+                if matched_rule_ids:
+                    for rule_id in matched_rule_ids:
+                        rule_doc = await db_manager.sporting_codes.find_one({"_id": rule_id})
+                        if rule_doc:
+                            matched_rules.append({
+                                "rule_id": rule_doc["_id"],
+                                "title": rule_doc["title"],
+                                "raw_text": rule_doc["raw_text"]
+                            })
                         
                         # Fallback to keyword matching if the agent didn't successfully query any rules
                         # or if the matched set is empty, to keep the React UI stable.
@@ -410,12 +478,22 @@ async def analyze_track_incident(payload: IncidentPayload):
                             },
                             "status": "Awaiting Human-in-the-Loop Confirmation"
                         })
-            except Exception as ge:
+            except (Exception, BaseException) as ge:
+                import exceptiongroup
+                from anyio import BrokenResourceError
+                if isinstance(ge, (exceptiongroup.ExceptionGroup, exceptiongroup.BaseExceptionGroup)):
+                    # Check if all sub-exceptions in the group are BrokenResourceError
+                    if all(isinstance(exc, BrokenResourceError) for exc in ge.exceptions):
+                        # Suppress this SDK-internal cleanup exception group and complete cleanly
+                        await queue.put({"type": "done"})
+                        return
+                
                 import traceback
                 traceback.print_exc()
                 await queue.put({"type": "error", "content": str(ge)})
             finally:
                 await queue.put({"type": "done"})
+
 
         # 2. Build the dynamic, series-aware penalty grading matrix
         if series_key == "F1":
@@ -474,14 +552,36 @@ async def analyze_track_incident(payload: IncidentPayload):
         {penalty_grading_matrix}
 
         --- DYNAMIC EVIDENCE GATHERING DIRECTIVES & SEARCH SPACE SCOPING ---
-        You have access to two tools:
-        1. `query_sporting_regulations(series_id, query)`: Search for rule articles.
-        2. `get_incident_precedents(circuit, turn_number, series_id)`: Search past rulings.
+        You have access to the following tool:
+        1. `find_documents(collection, filter_query, limit)`: Search or query documents from collections in the active database.
 
-        Before writing your final ruling, you MUST execute these tool calls to gather the necessary governing articles and historical precedents. Do not guess or assume rulebook text.
+        Available collections:
+        - `sporting_codes`: containing rule articles. Schema/fields:
+          * `_id` (string): The rule article ID, e.g. "FIA_APP_L_CH4_ART2B" or "WEC_SPORT_ART_10_1_1"
+          * `series_id` (string): "F1", "MOTOGP", or "WEC"
+          * `chapter` (string): Chapter number
+          * `article` (string): Article coordinate
+          * `title` (string): Article title
+          * `raw_text` (string): Granular text block of the regulation
+          * `search_tags` (array of strings): Semantic tags
+        - `incident_precedents`: containing past rulings/precedents. Schema/fields:
+          * `_id` (string/objectId): Precedent ID
+          * `incident_category` (string): The series, e.g. "F1", "MOTOGP", "WEC"
+          * `situation_keywords` (array of strings): Keyword tags
+          * `summary` (string): Summary description of the incident
+          * `official_verdict` (string): Official penalty or ruling
+          * `sporting_rule_cited` (string): Governing rule article ID cited
+
+        Before writing your final ruling, you MUST execute `find_documents` tool calls to query the necessary governing articles from `sporting_codes` and historical precedents from `incident_precedents`. Do not guess or assume rulebook text.
+
+        Query Construction Rules:
+        - To find regulations in `sporting_codes`, specify collection='sporting_codes' and a filter_query string. For example: `find_documents(collection="sporting_codes", filter_query='{{"series_id": "{payload.series_id}", "$or": [{{"search_tags": "contact"}}, {{"title": {{"$regex": "collision", "$options": "i"}}}}, {{"raw_text": {{"$regex": "collision", "$options": "i"}}}}]}}')`.
+        - To find precedents in `incident_precedents`, specify collection='incident_precedents' and a filter_query string. For example: `find_documents(collection="incident_precedents", filter_query='{{"incident_category": "{payload.series_id}"}}')`.
+
+
 
         Strict Search Space Scoping Controls:
-        - If the incident is a track collision, overtaking violation, track limits breach, or driving standards infraction, you MUST restrict your `query_sporting_regulations` keywords to on-track behavior, driving standards, and sporting penalties.
+        - If the incident is a track collision, overtaking violation, track limits breach, or driving standards infraction, you MUST restrict your `find_documents` search filters to on-track behavior, driving standards, and sporting penalties.
         - You are STRICTLY FORBIDDEN from querying keywords related to paddock logistics, pit lane mechanics' safety equipment, fueling gear, or administrative dress codes unless the Marshal Notes explicitly describe a pit lane or garage violation.
         - Enforce Targeted Queries: Prioritize querying or searching for the exact Article IDs (e.g., "ARTICLE 2.4.1", "WEC_ARTICLE_9_1_11") you uncover during your initial reasoning loop rather than generating broad, loose semantic search phrases.
 
@@ -513,6 +613,129 @@ async def analyze_track_incident(payload: IncidentPayload):
 
            After the two-line penalty declaration, provide a brief one-paragraph justification explaining why this specific penalty tier was selected from the grading matrix (baseline vs. escalation) and what factors from the marshal notes drove the decision.
         """
+
+        # --- 3.5 OPTIONAL PROXY INTEGRATION TO VERTEX AI REASONING ENGINE ---
+        if settings.GCP_PROJECT_ID and settings.GCP_REASONING_ENGINE_ID:
+            engine_id = settings.GCP_REASONING_ENGINE_ID
+            location = settings.GCP_LOCATION or "us-west1"
+            resource_name = f"projects/{settings.GCP_PROJECT_ID}/locations/{location}/reasoningEngines/{engine_id}"
+            try:
+                yield f"data: {json.dumps({'type': 'thinking', 'content': 'Contacting Vertex AI Reasoning Engine...'})}\n\n"
+                
+                import vertexai
+                from vertexai.preview import reasoning_engines
+                from vertexai.reasoning_engines import _utils
+                from google.cloud import aiplatform_v1beta1 as aiplatform
+                
+                vertexai.init(project=settings.GCP_PROJECT_ID, location=location)
+                engine = reasoning_engines.ReasoningEngine(resource_name)
+                
+                import threading
+                loop = asyncio.get_running_loop()
+                stream_queue = asyncio.Queue()
+                
+                def run_blocking_stream():
+                    try:
+                        session_id = payload.session_id or f"session_{payload.series_id}_{payload.turn_number}"
+                        user_id = f"steward_user_{payload.series_id.lower()}"
+                        response_stream = engine.execution_api_client.stream_query_reasoning_engine(
+                            request=aiplatform.types.StreamQueryReasoningEngineRequest(
+                                name=engine.resource_name,
+                                input={
+                                    "message": steward_prompt,
+                                    "user_id": user_id,
+                                    "session_id": session_id,
+                                },
+                                class_method="stream_query"
+                            )
+                        )
+                        for chunk in response_stream:
+                            asyncio.run_coroutine_threadsafe(stream_queue.put({"type": "chunk", "data": chunk}), loop)
+                        asyncio.run_coroutine_threadsafe(stream_queue.put({"type": "done"}), loop)
+                    except Exception as exc:
+                        logger.error(f"Error querying Reasoning Engine stream: {exc}", exc_info=True)
+                        asyncio.run_coroutine_threadsafe(stream_queue.put({"type": "error", "error": str(exc)}), loop)
+                
+                threading.Thread(target=run_blocking_stream, daemon=True).start()
+                
+                yield f"data: {json.dumps({'type': 'thinking', 'content': 'Querying matching sporting codes & historical precedents...'})}\n\n"
+                
+                full_draft_text = ""
+                while True:
+                    item = await stream_queue.get()
+                    if item["type"] == "done":
+                        break
+                    elif item["type"] == "error":
+                        err_msg = str(item.get("error", "Reasoning Engine execution failed"))
+                        yield f"data: {json.dumps({'type': 'error', 'content': f'Vertex AI Reasoning Engine stream error: {err_msg}'})}\n\n"
+                        break
+                    elif item["type"] == "chunk":
+                        chunk = item["data"]
+                        for parsed_json in _utils.yield_parsed_json(chunk):
+                            if parsed_json is not None:
+                                content = parsed_json.get("content", {})
+                                parts = content.get("parts", [])
+                                if parts:
+                                    text_chunk = parts[0].get("text", "")
+                                    if text_chunk:
+                                        full_draft_text += text_chunk
+                                        yield f"data: {json.dumps({'type': 'token', 'content': text_chunk})}\n\n"
+                
+                # Fetch full rule documents from MongoDB for matched rules in the MCP session
+                matched_rules = []
+                all_search_terms = extract_search_keywords(payload.marshal_notes)
+                regex_pattern = "|".join([f"(?:{re.escape(term)})" for term in all_search_terms if term])
+                if regex_pattern:
+                    cursor = db_manager.sporting_codes.find({
+                        "series_id": series_key,
+                        "$or": [
+                            {"search_tags": {"$regex": regex_pattern, "$options": "i"}},
+                            {"title": {"$regex": regex_pattern, "$options": "i"}},
+                            {"raw_text": {"$regex": regex_pattern, "$options": "i"}},
+                        ]
+                    })
+                    async for doc in cursor:
+                        matched_rules.append({
+                            "rule_id": doc["_id"],
+                            "title": doc["title"],
+                            "raw_text": doc["raw_text"]
+                        })
+                        if len(matched_rules) >= 3:
+                            break
+
+                metadata = {
+                    "type": "metadata",
+                    "applicable_clauses": matched_rules,
+                    "regulatory_framework": {
+                        "governing_body": series_config["governing_body"],
+                        "allowable_penalties": series_config["sanctioned_penalties"]
+                    },
+                    "cited_precedent_ids": cited_precedent_ids,
+                    "cited_precedents": [
+                        {
+                            "id": str(prec["_id"]),
+                            "incident_category": prec.get("incident_category"),
+                            "situation_keywords": prec.get("situation_keywords"),
+                            "summary": prec.get("summary"),
+                            "official_verdict": prec.get("official_verdict"),
+                            "sporting_rule_cited": prec.get("sporting_rule_cited")
+                        } for prec in top_precedents
+                    ],
+                    "telemetry_analysis": {
+                        "baseline_brake_point": baseline_brake_point,
+                        "baseline_apex_speed": baseline_apex_speed,
+                        "active_incident_brake_point": active_incident_brake_point,
+                        "active_incident_apex_speed": active_incident_apex_speed,
+                        "braking_delta": braking_delta,
+                        "speed_delta": speed_delta
+                    },
+                    "steward_draft_ruling": full_draft_text,
+                    "status": "Awaiting Human-in-the-Loop Confirmation"
+                }
+                yield f"data: {json.dumps(metadata)}\n\n"
+                return
+            except Exception as e:
+                print(f"GCP Reasoning Engine proxy failed ({str(e)}). Falling back to local Gemini client loop or Dialogflow CX...")
 
         # --- 4. OPTIONAL PROXY INTEGRATION TO GCP AGENT BUILDER ---
         if settings.GCP_PROJECT_ID and settings.GCP_AGENT_ID:
@@ -860,7 +1083,7 @@ async def toggle_stream(payload: ToggleStreamPayload):
         )
 
 @router.get("/settings/diagnostics", status_code=status.HTTP_200_OK)
-async def get_diagnostics():
+async def get_diagnostics(request: Request):
     try:
         import time
         import sys
@@ -905,20 +1128,18 @@ async def get_diagnostics():
             gemini_status = "ERROR"
             gemini_error = str(ge)
 
-        # 3. Local MCP Server Script Check
+        # 3. Official MongoDB Partner MCP Server Subprocess Check
         mcp_status = "DISCONNECTED"
         mcp_error = None
+        mcp_tools = []
         try:
-            mcp_server_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp_server.py")
-            if os.path.exists(mcp_server_path):
-                with open(mcp_server_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                if len(content) > 0:
-                    mcp_status = "CONNECTED"
-                else:
-                    mcp_status = "EMPTY_FILE"
+            mcp_session = getattr(request.app.state, "mcp_session", None)
+            if mcp_session is not None:
+                mcp_status = "CONNECTED"
+                mcp_tools = ["find", "insert-many", "update-many", "delete-many", "list-collections"]
             else:
-                mcp_status = "MISSING_FILE"
+                mcp_status = "DISCONNECTED"
+                mcp_error = "Official MongoDB Partner MCP Server is not running in this environment (missing Node.js/npx)."
         except Exception as me:
             mcp_status = "ERROR"
             mcp_error = str(me)
@@ -961,10 +1182,7 @@ async def get_diagnostics():
                 "status": mcp_status,
                 "error": mcp_error,
                 "transport": "STDIO SUBPROCESS",
-                "registered_tools": [
-                    "analyze_track_incident",
-                    "store_final_adjudication"
-                ]
+                "registered_tools": mcp_tools
             },
             "streams_details": {
                 "active_count": active_streams_count,

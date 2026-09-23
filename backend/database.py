@@ -18,6 +18,7 @@ class DatabaseManager:
         )
         self.db = self.client[settings.MONGO_DB_NAME]
         print(" MongoDB connection pool safely established.", file=sys.stderr)
+        print("Official MongoDB Partner MCP Server database connection initialized successfully.", file=sys.stderr)
         if seed:
             await self.seed_baseline_if_empty()
 
